@@ -1,0 +1,17 @@
+# Зависимости
+node_modules/
+
+# Локальные переменные окружения с секретами
+.env
+*.env.local
+
+# Системные файлы Windows и редакторов
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+
+# Сборки и логи
+dist/
+build/
+*.log
