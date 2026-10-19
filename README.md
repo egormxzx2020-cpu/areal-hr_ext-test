@@ -3,7 +3,7 @@
 Адрес моего репозитория: https://github.com/egormxzx2020-cpu/areal-hr_ext-test
 
 
-## Неделя 1
+## Неделя 1 19.10.2026
   
   ## Работа с системой контроля версий Git и GitHub в Visual Studio Code
 Разобрался в функциях гитхаба через веб интерфейс https://github.com/
