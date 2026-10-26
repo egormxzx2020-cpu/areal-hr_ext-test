@@ -238,7 +238,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useQuasar } from 'quasar';
-import { api } from 'boot/axios';
+import { api } from '../boot/axios';
 
 const $q = useQuasar();
 const activeTab = ref('organizations');

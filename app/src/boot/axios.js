@@ -1,7 +1,6 @@
 import { boot } from 'quasar/wrappers';
 import axios from 'axios';
 
-// Базовый URL бэкенда NestJS
 const api = axios.create({ baseURL: 'http://localhost:3000' });
 
 export default boot(({ app }) => {
