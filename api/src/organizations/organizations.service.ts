@@ -1,4 +1,9 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_CONNECTION } from '../database/database.module';
 import { CreateOrganizationDto, UpdateOrganizationDto } from './organizations.dto';
@@ -12,7 +17,7 @@ export class OrganizationsService {
       `SELECT id, name, comment, created_at, updated_at 
        FROM organizations 
        WHERE deleted_at IS NULL 
-       ORDER BY created_at DESC`
+       ORDER BY created_at DESC`,
     );
     return res.rows;
   }
@@ -22,7 +27,7 @@ export class OrganizationsService {
       `SELECT id, name, comment, created_at, updated_at 
        FROM organizations 
        WHERE id = $1 AND deleted_at IS NULL`,
-      [id]
+      [id],
     );
     if (!res.rows[0]) {
       throw new NotFoundException(`Организация с ID ${id} не найдена`);
@@ -35,7 +40,7 @@ export class OrganizationsService {
       `INSERT INTO organizations (name, comment) 
        VALUES ($1, $2) 
        RETURNING id, name, comment, created_at, updated_at`,
-      [dto.name, dto.comment || null]
+      [dto.name, dto.comment || null],
     );
     return res.rows[0];
   }
@@ -46,7 +51,7 @@ export class OrganizationsService {
        SET name = $1, comment = $2, updated_at = CURRENT_TIMESTAMP 
        WHERE id = $3 AND deleted_at IS NULL 
        RETURNING id, name, comment, created_at, updated_at`,
-      [dto.name, dto.comment || null, id]
+      [dto.name, dto.comment || null, id],
     );
     if (!res.rows[0]) {
       throw new NotFoundException(`Организация с ID ${id} не найдена`);
@@ -55,17 +60,27 @@ export class OrganizationsService {
   }
 
   async remove(id: string) {
-    // Мягкое удаление (Soft Delete) по требованию ТЗ
+    // 1. Проверяем, существует ли организация
+    await this.findOne(id);
+
+    // 2. Защита: нельзя удалить организацию, если в ней есть неудаленные отделы (409 Conflict)
+    const childDepts = await this.pool.query(
+      `SELECT 1 FROM departments WHERE organization_id = $1 AND deleted_at IS NULL LIMIT 1`,
+      [id],
+    );
+    if (childDepts.rowCount && childDepts.rowCount > 0) {
+      throw new ConflictException(
+        'Невозможно удалить организацию: в ней числятся активные подразделения. Сначала удалите или переместите отделы.',
+      );
+    }
+
     const res = await this.pool.query(
       `UPDATE organizations 
        SET deleted_at = CURRENT_TIMESTAMP 
        WHERE id = $1 AND deleted_at IS NULL 
        RETURNING id`,
-      [id]
+      [id],
     );
-    if (!res.rows[0]) {
-      throw new NotFoundException(`Организация с ID ${id} не найдена`);
-    }
-    return { success: true, id };
+    return { success: true, id: res.rows[0].id };
   }
 }

@@ -328,10 +328,38 @@ const deptColumns = [
   { name: 'actions', label: 'Действия', align: 'right' }
 ];
 
+// Рекурсивный поиск всех ID потомков выбранного отдела
+function getAllDescendantIds(deptId, allDepts) {
+  const result = new Set();
+  const findChildren = (parentId) => {
+    for (const d of allDepts) {
+      if (d.parent_id === parentId) {
+        result.add(d.id);
+        findChildren(d.id);
+      }
+    }
+  };
+  findChildren(deptId);
+  return result;
+}
+
+// Исключение текущего отдела и всех его потомков из селектора выбора родителя
 const availableParentDeptOptions = computed(() => {
   if (!deptForm.value.organization_id) return [];
-  return departments.value
-    .filter(d => d.organization_id === deptForm.value.organization_id && d.id !== deptDialog.value.id)
+
+  const orgDepts = departments.value.filter(
+    d => d.organization_id === deptForm.value.organization_id
+  );
+
+  if (!deptDialog.value.isEdit || !deptDialog.value.id) {
+    return orgDepts.map(d => ({ label: d.name, value: d.id }));
+  }
+
+  const descendantIds = getAllDescendantIds(deptDialog.value.id, orgDepts);
+  descendantIds.add(deptDialog.value.id);
+
+  return orgDepts
+    .filter(d => !descendantIds.has(d.id))
     .map(d => ({ label: d.name, value: d.id }));
 });
 
@@ -475,9 +503,12 @@ function confirmDelete(type, row) {
         await api.delete(`/positions/${row.id}`);
         await fetchPositions();
       }
-      showSuccess('Запись успешно удалена');
+      showSuccess('Запись успешно помечена как удаленная');
     } catch (err) {
-      showError(err.response?.data?.message || 'Не удалось удалить запись');
+      const errorMsg =
+        err.response?.data?.message ||
+        'Не удалось удалить запись: возможно, у неё есть связанные активные данные';
+      showError(errorMsg);
     }
   });
 }
