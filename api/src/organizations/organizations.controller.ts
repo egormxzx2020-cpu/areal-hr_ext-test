@@ -1,6 +1,22 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  ParseUUIDPipe,
+  UsePipes,
+} from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
-import { CreateOrganizationDto, UpdateOrganizationDto, createOrganizationSchema } from './organizations.dto';
+import {
+  CreateOrganizationDto,
+  UpdateOrganizationDto,
+  createOrganizationSchema,
+  updateOrganizationSchema,
+} from './organizations.dto';
+import { JoiValidationPipe } from '../common/pipes/joi-validation.pipe';
 
 @Controller('organizations')
 export class OrganizationsController {
@@ -12,30 +28,26 @@ export class OrganizationsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return this.organizationsService.findOne(id);
   }
 
   @Post()
+  @UsePipes(new JoiValidationPipe(createOrganizationSchema))
   create(@Body() body: CreateOrganizationDto) {
-    const { error, value } = createOrganizationSchema.validate(body);
-    if (error) {
-      throw new BadRequestException(error.details[0].message);
-    }
-    return this.organizationsService.create(value);
+    return this.organizationsService.create(body);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() body: UpdateOrganizationDto) {
-    const { error, value } = createOrganizationSchema.validate(body);
-    if (error) {
-      throw new BadRequestException(error.details[0].message);
-    }
-    return this.organizationsService.update(id, value);
+  update(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body(new JoiValidationPipe(updateOrganizationSchema)) body: UpdateOrganizationDto,
+  ) {
+    return this.organizationsService.update(id, body);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  remove(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return this.organizationsService.remove(id);
   }
 }

@@ -1,6 +1,22 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  ParseUUIDPipe,
+  UsePipes,
+} from '@nestjs/common';
 import { PositionsService } from './positions.service';
-import { CreatePositionDto, UpdatePositionDto, createPositionSchema } from './positions.dto';
+import {
+  CreatePositionDto,
+  UpdatePositionDto,
+  createPositionSchema,
+  updatePositionSchema,
+} from './positions.dto';
+import { JoiValidationPipe } from '../common/pipes/joi-validation.pipe';
 
 @Controller('positions')
 export class PositionsController {
@@ -12,30 +28,26 @@ export class PositionsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return this.positionsService.findOne(id);
   }
 
   @Post()
+  @UsePipes(new JoiValidationPipe(createPositionSchema))
   create(@Body() body: CreatePositionDto) {
-    const { error, value } = createPositionSchema.validate(body);
-    if (error) {
-      throw new BadRequestException(error.details[0].message);
-    }
-    return this.positionsService.create(value);
+    return this.positionsService.create(body);
   }
 
   @Put(':id')
-  update(@Param('id') id: string, @Body() body: UpdatePositionDto) {
-    const { error, value } = createPositionSchema.validate(body);
-    if (error) {
-      throw new BadRequestException(error.details[0].message);
-    }
-    return this.positionsService.update(id, value);
+  update(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body(new JoiValidationPipe(updatePositionSchema)) body: UpdatePositionDto,
+  ) {
+    return this.positionsService.update(id, body);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  remove(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return this.positionsService.remove(id);
   }
 }
