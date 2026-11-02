@@ -16,3 +16,6 @@ dist/
 build/
 *.log
 *.tsbuildinfo
+# Ревью и отчеты
+REVIEW*.md
+*.md.bak

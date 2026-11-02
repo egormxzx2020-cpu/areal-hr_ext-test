@@ -10,7 +10,7 @@
 * **Среда разработки (IDE):** Visual Studio Code (с расширениями GitLens, Draw.io Integration, Docker)
 * **СУБД:** PostgreSQL 17 в изолированном Docker-контейнере (`areal_postgres`), порт `5432`
 * **Проектирование схемы данных:** Draw.io (исходник: `docs/schema.drawio`, графическая схема: `docs/schema.png`)
-* **Backend:** Node.js v22 LTS, NestJS 10, pg (сырой пул соединений `pg.Pool`, без ORM по ТЗ), node-pg-migrate, Joi (валидация данных), Argon2id (хеширование паролей)
+* **Backend:** Node.js v22 LTS, NestJS 10, pg (сырой пул соединений `pg.Pool`, без ORM по ТЗ), node-pg-migrate, Joi (валидация данных), Argon2id (планируется на этапе реализации модуля авторизации по ТЗ)
 * **Frontend:** Vue.js 3.5, Quasar Framework v2, Vite, Axios
 * **Тестирование:** Jest (юнит-тесты бизнес-логики)
 * **Архитектурный стиль:** REST API (`http://localhost:3000` для API, `http://localhost:9000` для UI)

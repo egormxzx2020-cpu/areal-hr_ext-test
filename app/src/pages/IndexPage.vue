@@ -42,10 +42,48 @@
             :loading="loadingOrgs"
             no-data-label="Организации не найдены"
           >
+            <!-- Отображение наименования с учетом soft-delete -->
+            <template v-slot:body-cell-name="props">
+              <q-td :props="props">
+                <span :class="props.row.deleted_at ? 'text-strike text-grey-6' : 'text-weight-medium'">
+                  {{ props.row.name }}
+                </span>
+              </q-td>
+            </template>
+
+            <!-- Отображение статуса -->
+            <template v-slot:body-cell-status="props">
+              <q-td :props="props" align="center">
+                <q-badge v-if="props.row.deleted_at" color="negative" label="Удалена" />
+                <q-badge v-else color="positive" label="Активна" />
+              </q-td>
+            </template>
+
+            <!-- Кнопки действий -->
             <template v-slot:body-cell-actions="props">
               <q-td :props="props" align="right">
-                <q-btn flat round dense color="primary" icon="edit" @click="openOrgDialog(props.row)" />
-                <q-btn flat round dense color="negative" icon="delete" @click="confirmDelete('org', props.row)" />
+                <q-btn
+                  flat
+                  round
+                  dense
+                  color="primary"
+                  icon="edit"
+                  :disable="!!props.row.deleted_at"
+                  @click="openOrgDialog(props.row)"
+                >
+                  <q-tooltip v-if="props.row.deleted_at">Нельзя редактировать удаленную организацию</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  round
+                  dense
+                  color="negative"
+                  icon="delete"
+                  :disable="!!props.row.deleted_at"
+                  @click="confirmDelete('org', props.row)"
+                >
+                  <q-tooltip v-if="props.row.deleted_at">Организация уже удалена</q-tooltip>
+                </q-btn>
               </q-td>
             </template>
           </q-table>
@@ -63,7 +101,7 @@
                 outlined
                 emit-value
                 map-options
-                style="min-width: 240px"
+                style="min-width: 250px"
                 label="Фильтр по компании"
                 @update:model-value="fetchDepartments"
               />
@@ -80,10 +118,48 @@
             :loading="loadingDepts"
             no-data-label="Отделы не найдены"
           >
+            <!-- Отображение наименования -->
+            <template v-slot:body-cell-name="props">
+              <q-td :props="props">
+                <span :class="props.row.deleted_at ? 'text-strike text-grey-6' : 'text-weight-medium'">
+                  {{ props.row.name }}
+                </span>
+              </q-td>
+            </template>
+
+            <!-- Отображение статуса -->
+            <template v-slot:body-cell-status="props">
+              <q-td :props="props" align="center">
+                <q-badge v-if="props.row.deleted_at" color="negative" label="Удален" />
+                <q-badge v-else color="positive" label="Активен" />
+              </q-td>
+            </template>
+
+            <!-- Кнопки действий -->
             <template v-slot:body-cell-actions="props">
               <q-td :props="props" align="right">
-                <q-btn flat round dense color="primary" icon="edit" @click="openDeptDialog(props.row)" />
-                <q-btn flat round dense color="negative" icon="delete" @click="confirmDelete('dept', props.row)" />
+                <q-btn
+                  flat
+                  round
+                  dense
+                  color="primary"
+                  icon="edit"
+                  :disable="!!props.row.deleted_at"
+                  @click="openDeptDialog(props.row)"
+                >
+                  <q-tooltip v-if="props.row.deleted_at">Нельзя редактировать удаленный отдел</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  round
+                  dense
+                  color="negative"
+                  icon="delete"
+                  :disable="!!props.row.deleted_at"
+                  @click="confirmDelete('dept', props.row)"
+                >
+                  <q-tooltip v-if="props.row.deleted_at">Отдел уже помечен как удаленный</q-tooltip>
+                </q-btn>
               </q-td>
             </template>
           </q-table>
@@ -105,10 +181,48 @@
             :loading="loadingPositions"
             no-data-label="Должности не найдены"
           >
+            <!-- Отображение наименования -->
+            <template v-slot:body-cell-name="props">
+              <q-td :props="props">
+                <span :class="props.row.deleted_at ? 'text-strike text-grey-6' : 'text-weight-medium'">
+                  {{ props.row.name }}
+                </span>
+              </q-td>
+            </template>
+
+            <!-- Отображение статуса -->
+            <template v-slot:body-cell-status="props">
+              <q-td :props="props" align="center">
+                <q-badge v-if="props.row.deleted_at" color="negative" label="Удалена" />
+                <q-badge v-else color="positive" label="Активна" />
+              </q-td>
+            </template>
+
+            <!-- Кнопки действий -->
             <template v-slot:body-cell-actions="props">
               <q-td :props="props" align="right">
-                <q-btn flat round dense color="primary" icon="edit" @click="openPosDialog(props.row)" />
-                <q-btn flat round dense color="negative" icon="delete" @click="confirmDelete('pos', props.row)" />
+                <q-btn
+                  flat
+                  round
+                  dense
+                  color="primary"
+                  icon="edit"
+                  :disable="!!props.row.deleted_at"
+                  @click="openPosDialog(props.row)"
+                >
+                  <q-tooltip v-if="props.row.deleted_at">Нельзя редактировать удаленную должность</q-tooltip>
+                </q-btn>
+                <q-btn
+                  flat
+                  round
+                  dense
+                  color="negative"
+                  icon="delete"
+                  :disable="!!props.row.deleted_at"
+                  @click="confirmDelete('pos', props.row)"
+                >
+                  <q-tooltip v-if="props.row.deleted_at">Должность уже удалена</q-tooltip>
+                </q-btn>
               </q-td>
             </template>
           </q-table>
@@ -153,7 +267,7 @@
 
     <!-- ДИАЛОГ: ОТДЕЛ -->
     <q-dialog v-model="deptDialog.show" persistent>
-      <q-card style="min-width: 460px">
+      <q-card style="min-width: 480px">
         <q-card-section class="row items-center q-pb-none">
           <div class="text-h6">{{ deptDialog.isEdit ? 'Редактировать отдел' : 'Новый отдел' }}</div>
           <q-space />
@@ -163,7 +277,7 @@
           <q-card-section class="q-gutter-y-md">
             <q-select
               v-model="deptForm.organization_id"
-              :options="orgSelectOptions"
+              :options="activeOrgSelectOptions"
               label="Организация *"
               outlined
               dense
@@ -253,22 +367,31 @@ const orgForm = ref({ name: '', comment: '' });
 const orgColumns = [
   { name: 'name', label: 'Наименование', field: 'name', align: 'left', sortable: true },
   { name: 'comment', label: 'Комментарий', field: 'comment', align: 'left' },
+  { name: 'status', label: 'Статус', field: 'deleted_at', align: 'center', sortable: true },
   { 
     name: 'created_at', 
     label: 'Дата создания', 
-    field: row => new Date(row.created_at).toLocaleString('ru-RU'), 
+    field: row => row.created_at ? new Date(row.created_at).toLocaleString('ru-RU') : '—', 
     align: 'left', 
     sortable: true 
   },
   { name: 'actions', label: 'Действия', align: 'right' }
 ];
 
-const orgSelectOptions = computed(() => {
-  return organizations.value.map(o => ({ label: o.name, value: o.id }));
+// Для селектора выбора организации при создании/редактировании отдела: только неудаленные компании
+const activeOrgSelectOptions = computed(() => {
+  return organizations.value
+    .filter(o => !o.deleted_at)
+    .map(o => ({ label: o.name, value: o.id }));
 });
 
+// Для фильтра списка отделов: показываем все, помечая удаленные
 const orgFilterOptions = computed(() => {
-  return [{ label: 'Все компании', value: null }, ...orgSelectOptions.value];
+  const options = organizations.value.map(o => ({
+    label: o.name + (o.deleted_at ? ' (удалена)' : ''),
+    value: o.id
+  }));
+  return [{ label: 'Все компании', value: null }, ...options];
 });
 
 async function fetchOrganizations() {
@@ -325,10 +448,11 @@ const deptColumns = [
   { name: 'organization_name', label: 'Компания', field: 'organization_name', align: 'left', sortable: true },
   { name: 'parent_name', label: 'Вышестоящий отдел', field: row => row.parent_name || '—', align: 'left' },
   { name: 'comment', label: 'Комментарий', field: 'comment', align: 'left' },
+  { name: 'status', label: 'Статус', field: 'deleted_at', align: 'center', sortable: true },
   { name: 'actions', label: 'Действия', align: 'right' }
 ];
 
-// Рекурсивный поиск всех ID потомков выбранного отдела
+// Рекурсивный поиск идентификаторов всех потомков отдела (для защиты от циклов A -> B -> A)
 function getAllDescendantIds(deptId, allDepts) {
   const result = new Set();
   const findChildren = (parentId) => {
@@ -343,12 +467,15 @@ function getAllDescendantIds(deptId, allDepts) {
   return result;
 }
 
-// Исключение текущего отдела и всех его потомков из селектора выбора родителя
+// Список доступных родителей:
+// 1. Принадлежат той же организации;
+// 2. Являются активными (не удалены);
+// 3. Не являются редактируемым отделом и ни одним из его потомков.
 const availableParentDeptOptions = computed(() => {
   if (!deptForm.value.organization_id) return [];
 
   const orgDepts = departments.value.filter(
-    d => d.organization_id === deptForm.value.organization_id
+    d => d.organization_id === deptForm.value.organization_id && !d.deleted_at
   );
 
   if (!deptDialog.value.isEdit || !deptDialog.value.id) {
@@ -388,7 +515,7 @@ function openDeptDialog(row = null) {
   } else {
     deptDialog.value = { show: true, isEdit: false, id: null };
     deptForm.value = {
-      organization_id: selectedOrgFilter.value || (organizations.value[0]?.id || null),
+      organization_id: selectedOrgFilter.value || (activeOrgSelectOptions.value[0]?.value || null),
       parent_id: null,
       name: '',
       comment: ''
@@ -430,10 +557,11 @@ const posForm = ref({ name: '' });
 
 const posColumns = [
   { name: 'name', label: 'Наименование должности', field: 'name', align: 'left', sortable: true },
+  { name: 'status', label: 'Статус', field: 'deleted_at', align: 'center', sortable: true },
   { 
     name: 'created_at', 
     label: 'Дата создания', 
-    field: row => new Date(row.created_at).toLocaleString('ru-RU'), 
+    field: row => row.created_at ? new Date(row.created_at).toLocaleString('ru-RU') : '—', 
     align: 'left', 
     sortable: true 
   },
@@ -481,12 +609,12 @@ async function savePosition() {
   }
 }
 
-// =================== УДАЛЕНИЕ (SOFT DELETE) ===================
+// =================== УДАЛЕНИЕ (SOFT DELETE И СТАТУС 409) ===================
 function confirmDelete(type, row) {
   const titles = { org: 'организацию', dept: 'отдел', pos: 'должность' };
   $q.dialog({
     title: 'Подтверждение удаления',
-    message: `Вы уверены, что хотите удалить ${titles[type]} «${row.name}»? Запись будет помечена как удаленная.`,
+    message: `Вы уверены, что хотите удалить ${titles[type]} «${row.name}»? Запись перейдет в статус удаленной.`,
     cancel: { label: 'Отмена', flat: true },
     ok: { label: 'Удалить', color: 'negative' },
     persistent: true
@@ -505,9 +633,10 @@ function confirmDelete(type, row) {
       }
       showSuccess('Запись успешно помечена как удаленная');
     } catch (err) {
+      // Корректный перехват 409 Conflict и сообщение об ошибке валидации
       const errorMsg =
         err.response?.data?.message ||
-        'Не удалось удалить запись: возможно, у неё есть связанные активные данные';
+        'Не удалось удалить запись: возможно, у неё есть связанные активные подразделения';
       showError(errorMsg);
     }
   });
@@ -518,7 +647,7 @@ function showSuccess(message) {
 }
 
 function showError(message) {
-  $q.notify({ type: 'negative', message, position: 'top-right', timeout: 3500 });
+  $q.notify({ type: 'negative', message, position: 'top-right', timeout: 4000 });
 }
 
 onMounted(() => {
