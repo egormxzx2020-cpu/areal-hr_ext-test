@@ -2,8 +2,9 @@ import { Module, Global } from '@nestjs/common';
 import { Pool } from 'pg';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import * as Joi from 'joi';
+import { PG_CONNECTION } from './database.constants';
 
-export const PG_CONNECTION = 'PG_CONNECTION';
+export { PG_CONNECTION };
 
 const dbProvider = {
   provide: PG_CONNECTION,

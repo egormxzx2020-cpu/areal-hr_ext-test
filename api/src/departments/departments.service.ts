@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { Pool } from 'pg';
-import { PG_CONNECTION } from '../database/database.module';
+import { PG_CONNECTION } from '../database/database.constants';
 import { CreateDepartmentDto, UpdateDepartmentDto } from './departments.dto';
 
 @Injectable()
@@ -14,7 +14,6 @@ export class DepartmentsService {
   constructor(@Inject(PG_CONNECTION) private readonly pool: Pool) {}
 
   async findAll(organizationId?: string) {
-    // Фильтруем удаленные отделы и исключаем отделы удаленных организаций
     let query = `
       SELECT 
         d.id, 
@@ -25,11 +24,12 @@ export class DepartmentsService {
         d.name, 
         d.comment, 
         d.created_at, 
-        d.updated_at 
+        d.updated_at,
+        d.deleted_at
       FROM departments d
-      JOIN organizations o ON o.id = d.organization_id AND o.deleted_at IS NULL
-      LEFT JOIN departments p ON p.id = d.parent_id AND p.deleted_at IS NULL
-      WHERE d.deleted_at IS NULL
+      JOIN organizations o ON o.id = d.organization_id
+      LEFT JOIN departments p ON p.id = d.parent_id
+      WHERE 1=1
     `;
     const params: any[] = [];
 
@@ -38,7 +38,7 @@ export class DepartmentsService {
       query += ` AND d.organization_id = $1`;
     }
 
-    query += ` ORDER BY d.created_at DESC`;
+    query += ` ORDER BY (d.deleted_at IS NOT NULL), d.created_at DESC`;
 
     const res = await this.pool.query(query, params);
     return res.rows;
@@ -48,9 +48,9 @@ export class DepartmentsService {
     const res = await this.pool.query(
       `SELECT d.*, o.name AS organization_name, p.name AS parent_name
        FROM departments d
-       JOIN organizations o ON o.id = d.organization_id AND o.deleted_at IS NULL
-       LEFT JOIN departments p ON p.id = d.parent_id AND p.deleted_at IS NULL
-       WHERE d.id = $1 AND d.deleted_at IS NULL`,
+       JOIN organizations o ON o.id = d.organization_id
+       LEFT JOIN departments p ON p.id = d.parent_id
+       WHERE d.id = $1`,
       [id],
     );
     if (!res.rows[0]) {
@@ -60,10 +60,8 @@ export class DepartmentsService {
   }
 
   async create(dto: CreateDepartmentDto) {
-    // 1. Проверяем организацию
     await this.validateOrganization(dto.organization_id);
 
-    // 2. Проверяем родителя
     const parentId = dto.parent_id || null;
     if (parentId) {
       await this.validateParent(parentId, dto.organization_id);
@@ -79,24 +77,32 @@ export class DepartmentsService {
   }
 
   async update(id: string, dto: UpdateDepartmentDto) {
-    // 1. Проверяем существование обновляемого отдела
-    await this.findOne(id);
+    const currentDept = await this.findOne(id);
+    if (currentDept.deleted_at) {
+      throw new BadRequestException('Нельзя редактировать удаленный отдел');
+    }
 
-    // 2. Проверяем организацию
     await this.validateOrganization(dto.organization_id);
 
-    const parentId = dto.parent_id || null;
+    // Если организация изменилась, проверяем, нет ли активных дочерних отделов
+    if (currentDept.organization_id !== dto.organization_id) {
+      const children = await this.pool.query(
+        `SELECT 1 FROM departments WHERE parent_id = $1 AND deleted_at IS NULL LIMIT 1`,
+        [id],
+      );
+      if (children.rowCount && children.rowCount > 0) {
+        throw new BadRequestException(
+          'Нельзя сменить организацию у отдела, имеющего дочерние подразделения. Сначала переместите или удалите дочерние отделы.',
+        );
+      }
+    }
 
+    const parentId = dto.parent_id || null;
     if (parentId) {
-      // 3. Защита от прямого зацикливания на самого себя
       if (id === parentId) {
         throw new BadRequestException('Отдел не может быть родительским сам для себя');
       }
-
-      // 4. Проверяем родительский отдел (существование, активность, та же организация)
       await this.validateParent(parentId, dto.organization_id);
-
-      // 5. Защита от глубоких циклов (A -> B -> A): проверяем, не является ли новый родитель потомком текущего отдела
       await this.assertNoCycle(id, parentId);
     }
 
@@ -113,28 +119,38 @@ export class DepartmentsService {
   async remove(id: string) {
     await this.findOne(id);
 
-    // Защита: нельзя удалить отдел, если у него есть активные подотделы (409 Conflict)
-    const childDepts = await this.pool.query(
-      `SELECT 1 FROM departments WHERE parent_id = $1 AND deleted_at IS NULL LIMIT 1`,
-      [id],
-    );
-    if (childDepts.rowCount && childDepts.rowCount > 0) {
-      throw new ConflictException(
-        'Невозможно удалить отдел: у него есть дочерние подразделения. Сначала удалите или переместите их.',
+    // Выполняем проверку и удаление в атомарной транзакции
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const childDepts = await client.query(
+        `SELECT 1 FROM departments WHERE parent_id = $1 AND deleted_at IS NULL LIMIT 1 FOR UPDATE`,
+        [id],
       );
+      if (childDepts.rowCount && childDepts.rowCount > 0) {
+        throw new ConflictException(
+          'Невозможно удалить отдел: у него есть дочерние подразделения. Сначала удалите или переместите их.',
+        );
+      }
+
+      const res = await client.query(
+        `UPDATE departments 
+         SET deleted_at = CURRENT_TIMESTAMP 
+         WHERE id = $1 AND deleted_at IS NULL 
+         RETURNING id`,
+        [id],
+      );
+
+      await client.query('COMMIT');
+      return { success: true, id: res.rows[0].id };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
-
-    const res = await this.pool.query(
-      `UPDATE departments 
-       SET deleted_at = CURRENT_TIMESTAMP 
-       WHERE id = $1 AND deleted_at IS NULL 
-       RETURNING id`,
-      [id],
-    );
-    return { success: true, id: res.rows[0].id };
   }
-
-  // --- Вспомогательные проверки ---
 
   private async validateOrganization(orgId: string): Promise<void> {
     const res = await this.pool.query(
@@ -161,7 +177,6 @@ export class DepartmentsService {
   }
 
   private async assertNoCycle(currentDeptId: string, targetParentId: string): Promise<void> {
-    // Рекурсивный поиск всех потомков текущего отдела
     const cycleCheck = await this.pool.query(
       `
       WITH RECURSIVE descendants AS (

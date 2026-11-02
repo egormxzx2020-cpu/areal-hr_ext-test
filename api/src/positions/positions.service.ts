@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { Pool } from 'pg';
-import { PG_CONNECTION } from '../database/database.module';
+import { PG_CONNECTION } from '../database/database.constants';
 import { CreatePositionDto, UpdatePositionDto } from './positions.dto';
 
 @Injectable()
@@ -9,10 +9,9 @@ export class PositionsService {
 
   async findAll() {
     const res = await this.pool.query(
-      `SELECT id, name, created_at, updated_at 
+      `SELECT id, name, created_at, updated_at, deleted_at 
        FROM positions 
-       WHERE deleted_at IS NULL 
-       ORDER BY created_at DESC`
+       ORDER BY (deleted_at IS NOT NULL), created_at DESC`,
     );
     return res.rows;
   }

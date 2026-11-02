@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { DepartmentsService } from './departments.service';
-import { PG_CONNECTION } from '../database/database.module';
+import { PG_CONNECTION } from '../database/database.constants';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 
 describe('DepartmentsService', () => {
