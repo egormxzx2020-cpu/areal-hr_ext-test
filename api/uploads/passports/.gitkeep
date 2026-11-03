@@ -1,0 +1,3 @@
+# Загружаемые пользователями файлы
+api/uploads/*
+!api/uploads/**/.gitkeep
