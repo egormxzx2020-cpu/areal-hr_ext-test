@@ -5,11 +5,24 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 
 describe('DepartmentsService', () => {
   let service: DepartmentsService;
-  let mockPool: { query: jest.Mock };
+  let mockClient: {
+    query: jest.Mock;
+    release: jest.Mock;
+  };
+  let mockPool: {
+    query: jest.Mock;
+    connect: jest.Mock;
+  };
 
   beforeEach(async () => {
+    mockClient = {
+      query: jest.fn(),
+      release: jest.fn(),
+    };
+
     mockPool = {
       query: jest.fn(),
+      connect: jest.fn().mockResolvedValue(mockClient),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -30,10 +43,10 @@ describe('DepartmentsService', () => {
   });
 
   describe('findAll', () => {
-    it('должен возвращать список неудаленных отделов', async () => {
+    it('должен возвращать список отделов с сортировкой по признаку удаления', async () => {
       const mockRows = [
-        { id: 'dept-1', name: 'Отдел кадров', organization_name: 'ООО Ареал' },
-        { id: 'dept-2', name: 'Бухгалтерия', organization_name: 'ООО Ареал' },
+        { id: 'dept-1', name: 'Отдел кадров', organization_name: 'ООО Ареал', deleted_at: null },
+        { id: 'dept-2', name: 'Бухгалтерия', organization_name: 'ООО Ареал', deleted_at: '2026-01-01' },
       ];
       mockPool.query.mockResolvedValueOnce({ rows: mockRows });
 
@@ -41,7 +54,7 @@ describe('DepartmentsService', () => {
 
       expect(result).toEqual(mockRows);
       expect(mockPool.query).toHaveBeenCalledTimes(1);
-      expect(mockPool.query.mock.calls[0][0]).toContain('d.deleted_at IS NULL');
+      expect(mockPool.query.mock.calls[0][0]).toContain('ORDER BY (d.deleted_at IS NOT NULL)');
     });
 
     it('должен фильтровать отделы по organization_id, если параметр передан', async () => {
@@ -65,7 +78,7 @@ describe('DepartmentsService', () => {
       expect(result).toEqual(mockDept);
     });
 
-    it('должен выбрасывать NotFoundException, если отдел не найден или удален', async () => {
+    it('должен выбрасывать NotFoundException, если отдел не найден', async () => {
       mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       await expect(service.findOne('non-existent')).rejects.toThrow(NotFoundException);
@@ -80,7 +93,6 @@ describe('DepartmentsService', () => {
     };
 
     it('должен выбрасывать BadRequestException, если организация не найдена или удалена', async () => {
-      // Имитируем, что организация не найдена
       mockPool.query.mockResolvedValueOnce({ rows: [] });
 
       await expect(service.create(dto)).rejects.toThrow(
@@ -94,9 +106,7 @@ describe('DepartmentsService', () => {
         parent_id: '22222222-2222-4222-8222-222222222222',
       };
 
-      // 1. Организация найдена
       mockPool.query.mockResolvedValueOnce({ rows: [{ id: dto.organization_id }] });
-      // 2. Родительский отдел найден, но принадлежит ДРУГОЙ организации
       mockPool.query.mockResolvedValueOnce({
         rows: [{ id: dtoWithParent.parent_id, organization_id: 'other-org-id' }],
       });
@@ -108,9 +118,7 @@ describe('DepartmentsService', () => {
 
     it('должен успешно создавать отдел при корректных связях', async () => {
       const createdDept = { id: 'new-id', ...dto };
-      // 1. Проверка организации
       mockPool.query.mockResolvedValueOnce({ rows: [{ id: dto.organization_id }] });
-      // 2. Вставка записи
       mockPool.query.mockResolvedValueOnce({ rows: [createdDept] });
 
       const result = await service.create(dto);
@@ -124,15 +132,13 @@ describe('DepartmentsService', () => {
     const orgId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
     it('должен выбрасывать BadRequestException при попытке назначить родителем самого себя', async () => {
-      // 1. findOne проходит успешно
       mockPool.query.mockResolvedValueOnce({ rows: [{ id: deptId, organization_id: orgId }] });
-      // 2. validateOrganization проходит успешно
       mockPool.query.mockResolvedValueOnce({ rows: [{ id: orgId }] });
 
       const dto = {
         name: 'Отдел',
         organization_id: orgId,
-        parent_id: deptId, // Ссылка на самого себя
+        parent_id: deptId,
       };
 
       await expect(service.update(deptId, dto)).rejects.toThrow(
@@ -142,13 +148,9 @@ describe('DepartmentsService', () => {
 
     it('должен блокировать создание циклической зависимости (A -> B -> A) через CTE-поиск', async () => {
       const parentId = '22222222-2222-4222-8222-222222222222';
-      // 1. findOne
       mockPool.query.mockResolvedValueOnce({ rows: [{ id: deptId, organization_id: orgId }] });
-      // 2. validateOrganization
       mockPool.query.mockResolvedValueOnce({ rows: [{ id: orgId }] });
-      // 3. validateParent
       mockPool.query.mockResolvedValueOnce({ rows: [{ id: parentId, organization_id: orgId }] });
-      // 4. assertNoCycle: рекурсивный CTE возвращает совпадение (новый родитель уже есть в потомках!)
       mockPool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ id: parentId }] });
 
       const dto = {
@@ -165,31 +167,36 @@ describe('DepartmentsService', () => {
     });
   });
 
-  describe('remove (409 Conflict и Soft Delete)', () => {
+  describe('remove (409 Conflict и Soft Delete в транзакции)', () => {
     const deptId = 'dept-to-delete';
 
-    it('должен выбрасывать ConflictException (409), если у отдела есть неудаленные потомки', async () => {
-      // 1. findOne
-      mockPool.query.mockResolvedValueOnce({ rows: [{ id: deptId }] });
-      // 2. Проверка дочерних подразделений: найден минимум 1 ребенок
-      mockPool.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ 1: 1 }] });
+    it('должен выбрасывать ConflictException (409) и делать ROLLBACK, если есть неудаленные потомки', async () => {
+      mockPool.query.mockResolvedValueOnce({ rows: [{ id: deptId }] }); // findOne
+      mockClient.query.mockResolvedValueOnce({}); // BEGIN
+      mockClient.query.mockResolvedValueOnce({ rowCount: 1, rows: [{ 1: 1 }] }); // SELECT childDepts
+      mockClient.query.mockResolvedValueOnce({}); // ROLLBACK
 
       await expect(service.remove(deptId)).rejects.toThrow(ConflictException);
+      expect(mockPool.connect).toHaveBeenCalledTimes(1);
+      expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
+      expect(mockClient.query).toHaveBeenCalledWith('ROLLBACK');
+      expect(mockClient.release).toHaveBeenCalledTimes(1);
     });
 
-    it('должен выполнять мягкое удаление (UPDATE deleted_at), если дочерних отделов нет', async () => {
-      // 1. findOne
-      mockPool.query.mockResolvedValueOnce({ rows: [{ id: deptId }] });
-      // 2. Проверка детей: детей нет
-      mockPool.query.mockResolvedValueOnce({ rowCount: 0, rows: [] });
-      // 3. Выполнение soft-delete
-      mockPool.query.mockResolvedValueOnce({ rows: [{ id: deptId }] });
+    it('должен выполнять мягкое удаление (UPDATE deleted_at) и COMMIT, если дочерних отделов нет', async () => {
+      mockPool.query.mockResolvedValueOnce({ rows: [{ id: deptId }] }); // findOne
+      mockClient.query.mockResolvedValueOnce({}); // BEGIN
+      mockClient.query.mockResolvedValueOnce({ rowCount: 0, rows: [] }); // SELECT childDepts
+      mockClient.query.mockResolvedValueOnce({ rows: [{ id: deptId }] }); // UPDATE departments
+      mockClient.query.mockResolvedValueOnce({}); // COMMIT
 
       const result = await service.remove(deptId);
 
       expect(result).toEqual({ success: true, id: deptId });
-      expect(mockPool.query.mock.calls[2][0]).toContain('UPDATE departments');
-      expect(mockPool.query.mock.calls[2][0]).toContain('SET deleted_at = CURRENT_TIMESTAMP');
+      expect(mockPool.connect).toHaveBeenCalledTimes(1);
+      expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
+      expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
+      expect(mockClient.release).toHaveBeenCalledTimes(1);
     });
   });
 });
