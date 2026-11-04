@@ -3,6 +3,7 @@ import { DatabaseModule } from './database/database.module';
 import { PositionsModule } from './positions/positions.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { DepartmentsModule } from './departments/departments.module';
+import { FilesModule } from './files/files.module';
 
 @Module({
   imports: [
