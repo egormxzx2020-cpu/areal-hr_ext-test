@@ -46,7 +46,7 @@
                 </template>
               </q-input>
             </div>
-            <q-btn color="primary" icon="person_add" label="Добавить сотрудника" @click="openCreateEmployeeNotice" />
+            <q-btn color="primary" icon="person_add" label="Добавить сотрудника" @click="openCreateEmployee" />
           </div>
 
           <q-table
@@ -58,7 +58,7 @@
             :loading="loadingEmployees"
             no-data-label="Сотрудники не найдены"
           >
-            <!-- Отображение ФИО -->
+            <!-- ФИО сотрудника -->
             <template v-slot:body-cell-fio="props">
               <q-td :props="props">
                 <span :class="props.row.deleted_at ? 'text-strike text-grey-6' : 'text-weight-medium'">
@@ -67,7 +67,7 @@
               </q-td>
             </template>
 
-            <!-- Отображение количества сканов -->
+            <!-- Количество сканов -->
             <template v-slot:body-cell-files_count="props">
               <q-td :props="props" align="center">
                 <q-chip
@@ -83,7 +83,7 @@
               </q-td>
             </template>
 
-            <!-- Отображение статуса -->
+            <!-- Статус записи -->
             <template v-slot:body-cell-status="props">
               <q-td :props="props" align="center">
                 <q-badge v-if="props.row.deleted_at" color="negative" label="Удален" />
@@ -111,7 +111,7 @@
                   color="primary"
                   icon="edit"
                   :disable="!!props.row.deleted_at"
-                  @click="openCreateEmployeeNotice"
+                  @click="openEditEmployee(props.row)"
                 >
                   <q-tooltip v-if="props.row.deleted_at">Нельзя редактировать удаленного сотрудника</q-tooltip>
                   <q-tooltip v-else>Редактировать анкету</q-tooltip>
@@ -317,6 +317,253 @@
       </q-tab-panels>
     </q-card>
 
+    <!-- МОДАЛЬНОЕ ОКНО: СОЗДАНИЕ / РЕДАКТИРОВАНИЕ СОТРУДНИКА -->
+    <q-dialog v-model="empDialog.show" persistent>
+      <q-card style="width: 860px; max-width: 95vw;">
+        <q-form @submit.prevent="saveEmployee">
+          
+          <!-- Фиксированная шапка -->
+          <q-card-section class="row items-center bg-primary text-white q-py-sm">
+            <div class="text-h6">{{ empDialog.isEdit ? 'Редактировать анкету сотрудника' : 'Новый сотрудник' }}</div>
+            <q-space />
+            <q-btn icon="close" flat round dense v-close-popup />
+          </q-card-section>
+
+          <!-- Прокручиваемый блок анкеты -->
+          <q-card-section style="max-height: 70vh;" class="scroll q-pa-md q-gutter-y-md">
+            
+            <!-- Секция 1: Личные данные -->
+            <div>
+              <div class="text-subtitle2 text-primary text-weight-bold q-mb-sm">1. Личные данные</div>
+              <div class="row q-col-gutter-sm">
+                <div class="col-12 col-sm-4">
+                  <q-input
+                    v-model="empForm.last_name"
+                    label="Фамилия *"
+                    outlined
+                    dense
+                    :rules="[val => !!val && val.trim().length >= 2 || 'Минимум 2 символа']"
+                  />
+                </div>
+                <div class="col-12 col-sm-4">
+                  <q-input
+                    v-model="empForm.first_name"
+                    label="Имя *"
+                    outlined
+                    dense
+                    :rules="[val => !!val && val.trim().length >= 2 || 'Минимум 2 символа']"
+                  />
+                </div>
+                <div class="col-12 col-sm-4">
+                  <q-input
+                    v-model="empForm.middle_name"
+                    label="Отчество (при наличии)"
+                    outlined
+                    dense
+                  />
+                </div>
+                <div class="col-12 col-sm-4">
+                  <q-input
+                    v-model="empForm.birth_date"
+                    label="Дата рождения *"
+                    type="date"
+                    outlined
+                    dense
+                    stack-label
+                    :rules="[val => !!val || 'Укажите дату рождения']"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <q-separator />
+
+            <!-- Секция 2: Паспорт РФ -->
+            <div>
+              <div class="text-subtitle2 text-primary text-weight-bold q-mb-sm">2. Паспорт гражданина РФ</div>
+              <div class="row q-col-gutter-sm">
+                <div class="col-6 col-sm-3">
+                  <q-input
+                    v-model="empForm.passport_series"
+                    label="Серия (4 цифры) *"
+                    mask="####"
+                    outlined
+                    dense
+                    :rules="[val => /^\d{4}$/.test(val) || 'Ровно 4 цифры']"
+                  />
+                </div>
+                <div class="col-6 col-sm-3">
+                  <q-input
+                    v-model="empForm.passport_number"
+                    label="Номер (6 цифр) *"
+                    mask="######"
+                    outlined
+                    dense
+                    :rules="[val => /^\d{6}$/.test(val) || 'Ровно 6 цифр']"
+                  />
+                </div>
+                <div class="col-6 col-sm-3">
+                  <q-input
+                    v-model="empForm.passport_issue_date"
+                    label="Дата выдачи *"
+                    type="date"
+                    outlined
+                    dense
+                    stack-label
+                    :rules="[val => !!val || 'Укажите дату выдачи']"
+                  />
+                </div>
+                <div class="col-6 col-sm-3">
+                  <q-input
+                    v-model="empForm.passport_department_code"
+                    label="Код подразделения *"
+                    mask="###-###"
+                    outlined
+                    dense
+                    :rules="[val => /^\d{3}-\d{3}$/.test(val) || 'Формат 000-000']"
+                  />
+                </div>
+                <div class="col-12">
+                  <q-input
+                    v-model="empForm.passport_issued_by"
+                    label="Кем выдан паспорт *"
+                    outlined
+                    dense
+                    :rules="[val => !!val && val.trim().length >= 2 || 'Заполните орган выдачи']"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <q-separator />
+
+            <!-- Секция 3: Адрес регистрации -->
+            <div>
+              <div class="text-subtitle2 text-primary text-weight-bold q-mb-sm">3. Адрес постоянной регистрации</div>
+              <div class="row q-col-gutter-sm">
+                <div class="col-12 col-sm-6">
+                  <q-input
+                    v-model="empForm.reg_region"
+                    label="Субъект РФ (область / край / республика) *"
+                    outlined
+                    dense
+                    :rules="[val => !!val && val.trim().length >= 2 || 'Укажите регион']"
+                  />
+                </div>
+                <div class="col-12 col-sm-6">
+                  <q-input
+                    v-model="empForm.reg_city"
+                    label="Город / населенный пункт *"
+                    outlined
+                    dense
+                    :rules="[val => !!val && val.trim().length >= 2 || 'Укажите город']"
+                  />
+                </div>
+                <div class="col-12 col-sm-6">
+                  <q-input
+                    v-model="empForm.reg_street"
+                    label="Улица / проспект / переулок *"
+                    outlined
+                    dense
+                    :rules="[val => !!val && val.trim().length >= 2 || 'Укажите улицу']"
+                  />
+                </div>
+                <div class="col-4 col-sm-2">
+                  <q-input
+                    v-model="empForm.reg_house"
+                    label="Дом *"
+                    outlined
+                    dense
+                    :rules="[val => !!val && val.trim().length >= 1 || 'Укажите дом']"
+                  />
+                </div>
+                <div class="col-4 col-sm-2">
+                  <q-input
+                    v-model="empForm.reg_building"
+                    label="Корпус / строение"
+                    outlined
+                    dense
+                  />
+                </div>
+                <div class="col-4 col-sm-2">
+                  <q-input
+                    v-model="empForm.reg_apartment"
+                    label="Квартира"
+                    outlined
+                    dense
+                  />
+                </div>
+              </div>
+            </div>
+
+            <q-separator />
+
+            <!-- Секция 4: Сканы паспорта -->
+            <div>
+              <div class="text-subtitle2 text-primary text-weight-bold q-mb-sm">
+                4. Сканы паспорта (JPG, PNG, PDF до 10 МБ)
+              </div>
+              
+              <q-file
+                v-model="fileUploadInput"
+                label="Нажмите для выбора одного или нескольких файлов сканов..."
+                outlined
+                dense
+                multiple
+                accept=".jpg,.jpeg,.png,.webp,.pdf"
+                :loading="uploadingFiles"
+                class="q-mb-sm"
+                @update:model-value="handleFileUpload"
+              >
+                <template v-slot:prepend>
+                  <q-icon name="cloud_upload" />
+                </template>
+              </q-file>
+
+              <div v-if="attachedFiles.length > 0" class="q-gutter-y-xs">
+                <div class="text-caption text-grey-8">Прикрепленные к анкете документы ({{ attachedFiles.length }}):</div>
+                <q-list bordered separator dense class="rounded-borders bg-grey-1">
+                  <q-item v-for="(file, idx) in attachedFiles" :key="file.id">
+                    <q-item-section avatar>
+                      <q-icon :name="file.mime_type?.includes('pdf') ? 'picture_as_pdf' : 'image'" color="primary" />
+                    </q-item-section>
+                    <q-item-section>
+                      <q-item-label>{{ file.name }}</q-item-label>
+                      <q-item-label caption>{{ (file.size / 1024).toFixed(1) }} КБ</q-item-label>
+                    </q-item-section>
+                    <q-item-section side>
+                      <div class="row items-center q-gutter-x-xs">
+                        <q-btn flat dense round icon="open_in_new" color="primary" @click="openFileDownload(file.id)">
+                          <q-tooltip>Просмотр файла</q-tooltip>
+                        </q-btn>
+                        <q-btn flat dense round icon="delete" color="negative" @click="removeAttachedFile(idx)">
+                          <q-tooltip>Открепить файл</q-tooltip>
+                        </q-btn>
+                      </div>
+                    </q-item-section>
+                  </q-item>
+                </q-list>
+              </div>
+            </div>
+
+          </q-card-section>
+
+          <q-separator />
+
+          <!-- Фиксированный подвал с кнопками -->
+          <q-card-actions align="right" class="q-pa-md bg-grey-1">
+            <q-btn flat label="Отмена" color="grey" v-close-popup />
+            <q-btn
+              :label="empDialog.isEdit ? 'Сохранить изменения' : 'Добавить сотрудника'"
+              color="primary"
+              type="submit"
+              :loading="saving"
+            />
+          </q-card-actions>
+        </q-form>
+      </q-card>
+    </q-dialog>
+
     <!-- МОДАЛЬНОЕ ОКНО: ПРОСМОТР АНКЕТЫ СОТРУДНИКА И СКАНОВ -->
     <q-dialog v-model="viewEmpDialog.show">
       <q-card style="min-width: 650px; max-width: 800px">
@@ -332,7 +579,6 @@
         </q-card-section>
 
         <q-card-section v-else-if="viewEmpDialog.data" class="q-pa-md q-gutter-y-md">
-          <!-- Личные данные -->
           <div>
             <div class="text-subtitle2 text-primary text-weight-bold">Личные данные</div>
             <div class="row q-col-gutter-sm q-mt-xs">
@@ -342,7 +588,6 @@
           </div>
           <q-separator />
 
-          <!-- Паспортные данные -->
           <div>
             <div class="text-subtitle2 text-primary text-weight-bold">Паспортные данные РФ</div>
             <div class="row q-col-gutter-sm q-mt-xs">
@@ -355,7 +600,6 @@
           </div>
           <q-separator />
 
-          <!-- Адрес регистрации -->
           <div>
             <div class="text-subtitle2 text-primary text-weight-bold">Адрес постоянной регистрации</div>
             <div class="q-mt-xs">
@@ -364,7 +608,6 @@
           </div>
           <q-separator />
 
-          <!-- Прикрепленные сканы -->
           <div>
             <div class="text-subtitle2 text-primary text-weight-bold q-mb-sm">
               Прикрепленные сканы паспорта ({{ viewEmpDialog.data.passport_files?.length || 0 }})
@@ -531,11 +774,18 @@ const $q = useQuasar();
 const activeTab = ref('employees');
 const saving = ref(false);
 
-// Вспомогательные функции форматирования
 function formatDate(dateStr) {
   if (!dateStr) return '—';
   const d = new Date(dateStr);
   return isNaN(d.getTime()) ? dateStr : d.toLocaleDateString('ru-RU');
+}
+
+function toInputDate(val) {
+  if (!val) return '';
+  if (typeof val === 'string' && val.includes('T')) {
+    return val.split('T')[0];
+  }
+  return val;
 }
 
 function formatAddress(row) {
@@ -555,6 +805,29 @@ const employees = ref([]);
 const loadingEmployees = ref(false);
 const employeeSearch = ref('');
 let searchTimer = null;
+
+const empDialog = ref({ show: false, isEdit: false, id: null });
+const empForm = ref({
+  last_name: '',
+  first_name: '',
+  middle_name: '',
+  birth_date: '',
+  passport_series: '',
+  passport_number: '',
+  passport_issue_date: '',
+  passport_department_code: '',
+  passport_issued_by: '',
+  reg_region: '',
+  reg_city: '',
+  reg_street: '',
+  reg_house: '',
+  reg_building: '',
+  reg_apartment: ''
+});
+
+const fileUploadInput = ref(null);
+const uploadingFiles = ref(false);
+const attachedFiles = ref([]);
 
 const viewEmpDialog = ref({
   show: false,
@@ -595,6 +868,124 @@ function onSearchInput() {
   }, 350);
 }
 
+function openCreateEmployee() {
+  empDialog.value = { show: true, isEdit: false, id: null };
+  empForm.value = {
+    last_name: '',
+    first_name: '',
+    middle_name: '',
+    birth_date: '',
+    passport_series: '',
+    passport_number: '',
+    passport_issue_date: '',
+    passport_department_code: '',
+    passport_issued_by: '',
+    reg_region: '',
+    reg_city: '',
+    reg_street: '',
+    reg_house: '',
+    reg_building: '',
+    reg_apartment: ''
+  };
+  attachedFiles.value = [];
+  fileUploadInput.value = null;
+}
+
+async function openEditEmployee(row) {
+  try {
+    const res = await api.get(`/employees/${row.id}`);
+    const data = res.data;
+    empDialog.value = { show: true, isEdit: true, id: data.id };
+    empForm.value = {
+      last_name: data.last_name || '',
+      first_name: data.first_name || '',
+      middle_name: data.middle_name || '',
+      birth_date: toInputDate(data.birth_date),
+      passport_series: data.passport_series || '',
+      passport_number: data.passport_number || '',
+      passport_issue_date: toInputDate(data.passport_issue_date),
+      passport_department_code: data.passport_department_code || '',
+      passport_issued_by: data.passport_issued_by || '',
+      reg_region: data.reg_region || '',
+      reg_city: data.reg_city || '',
+      reg_street: data.reg_street || '',
+      reg_house: data.reg_house || '',
+      reg_building: data.reg_building || '',
+      reg_apartment: data.reg_apartment || ''
+    };
+    attachedFiles.value = data.passport_files ? [...data.passport_files] : [];
+    fileUploadInput.value = null;
+  } catch (err) {
+    showError('Не удалось загрузить данные сотрудника');
+  }
+}
+
+async function handleFileUpload(files) {
+  if (!files || files.length === 0) return;
+  uploadingFiles.value = true;
+  try {
+    const formData = new FormData();
+    for (const f of files) {
+      formData.append('files', f);
+    }
+    const res = await api.post('/files/upload-multiple', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    for (const uploaded of res.data) {
+      attachedFiles.value.push(uploaded);
+    }
+    showSuccess(`Прикреплено файлов: ${res.data.length}`);
+  } catch (err) {
+    showError(err.response?.data?.message || 'Ошибка при загрузке файлов');
+  } finally {
+    uploadingFiles.value = false;
+    fileUploadInput.value = null;
+  }
+}
+
+function removeAttachedFile(index) {
+  attachedFiles.value.splice(index, 1);
+}
+
+async function saveEmployee() {
+  saving.value = true;
+  try {
+    const payload = {
+      last_name: empForm.value.last_name.trim(),
+      first_name: empForm.value.first_name.trim(),
+      middle_name: empForm.value.middle_name?.trim() || null,
+      birth_date: empForm.value.birth_date,
+      passport_series: empForm.value.passport_series.trim(),
+      passport_number: empForm.value.passport_number.trim(),
+      passport_issue_date: empForm.value.passport_issue_date,
+      passport_department_code: empForm.value.passport_department_code.trim(),
+      passport_issued_by: empForm.value.passport_issued_by.trim(),
+      reg_region: empForm.value.reg_region.trim(),
+      reg_city: empForm.value.reg_city.trim(),
+      reg_street: empForm.value.reg_street.trim(),
+      reg_house: empForm.value.reg_house.trim(),
+      reg_building: empForm.value.reg_building?.trim() || null,
+      reg_apartment: empForm.value.reg_apartment?.trim() || null,
+      file_ids: attachedFiles.value.map(f => f.id)
+    };
+
+    if (empDialog.value.isEdit) {
+      await api.put(`/employees/${empDialog.value.id}`, payload);
+      showSuccess('Анкета сотрудника успешно обновлена');
+    } else {
+      await api.post('/employees', payload);
+      showSuccess('Сотрудник успешно добавлен в систему');
+    }
+
+    empDialog.value.show = false;
+    await fetchEmployees();
+  } catch (err) {
+    showError(err.response?.data?.message || 'Ошибка при сохранении сотрудника');
+  } finally {
+    saving.value = false;
+  }
+}
+
 async function openViewEmployee(row) {
   viewEmpDialog.value = { show: true, loading: true, data: null };
   try {
@@ -611,15 +1002,6 @@ async function openViewEmployee(row) {
 function openFileDownload(fileId) {
   const baseURL = api.defaults.baseURL || 'http://localhost:3000';
   window.open(`${baseURL}/files/${fileId}/download`, '_blank');
-}
-
-function openCreateEmployeeNotice() {
-  $q.notify({
-    type: 'info',
-    message: 'Полная форма ввода всех 15 полей с загрузчиком сканов подключается на Этапе 5',
-    position: 'top-right',
-    timeout: 3000
-  });
 }
 
 // =================== 2. ОРГАНИЗАЦИИ ===================
