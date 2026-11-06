@@ -12,6 +12,8 @@ import { EmployeesModule } from './employees/employees.module';
     PositionsModule,
     OrganizationsModule,
     DepartmentsModule,
+    FilesModule,
+    EmployeesModule,
   ],
   controllers: [],
   providers: [],
