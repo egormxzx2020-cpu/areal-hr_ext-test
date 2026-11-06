@@ -6,7 +6,7 @@
         <q-toolbar-title>
           Areal HR — Система кадрового учета
         </q-toolbar-title>
-        <div class="text-caption">Неделя 2: Справочники</div>
+        <div class="text-caption">Неделя 3: Учет сотрудников и документы</div>
       </q-toolbar>
     </q-header>
 
