@@ -101,19 +101,23 @@ describe('EmployeesService', () => {
   });
 
   describe('create', () => {
-    it('должен создавать сотрудника и привязывать сканы в транзакции', async () => {
+    it('должен создавать сотрудника и привязывать валидные файлы в транзакции', async () => {
       const createdId = 'new-emp-id';
       const createdRecord = { id: createdId, ...sampleEmployeeDto, passport_files: [] };
 
       // 1. BEGIN
       mockClient.query.mockResolvedValueOnce({});
-      // 2. INSERT INTO employees
+      // 2. validateFileIds (файлы найдены и активны)
+      mockClient.query.mockResolvedValueOnce({
+        rows: [{ id: sampleEmployeeDto.file_ids[0] }],
+      });
+      // 3. INSERT INTO employees
       mockClient.query.mockResolvedValueOnce({ rows: [{ id: createdId }] });
-      // 3. INSERT INTO employee_passport_files
+      // 4. INSERT INTO employee_passport_files
       mockClient.query.mockResolvedValueOnce({});
-      // 4. COMMIT
+      // 5. COMMIT
       mockClient.query.mockResolvedValueOnce({});
-      // 5. findOne (вызов через pool.query)
+      // 6. findOne (через pool.query)
       mockPool.query.mockResolvedValueOnce({ rows: [createdRecord] });
 
       const result = await service.create(sampleEmployeeDto);
@@ -121,6 +125,19 @@ describe('EmployeesService', () => {
       expect(result).toEqual(createdRecord);
       expect(mockClient.query).toHaveBeenCalledWith('BEGIN');
       expect(mockClient.query).toHaveBeenCalledWith('COMMIT');
+      expect(mockClient.release).toHaveBeenCalledTimes(1);
+    });
+
+    it('должен выбрасывать BadRequestException, если передан несуществующий или удаленный file_id', async () => {
+      // 1. BEGIN
+      mockClient.query.mockResolvedValueOnce({});
+      // 2. validateFileIds возвращает пустой список (файл не найден или удален)
+      mockClient.query.mockResolvedValueOnce({ rows: [] });
+      // 3. ROLLBACK
+      mockClient.query.mockResolvedValueOnce({});
+
+      await expect(service.create(sampleEmployeeDto)).rejects.toThrow(BadRequestException);
+      expect(mockClient.query).toHaveBeenCalledWith('ROLLBACK');
       expect(mockClient.release).toHaveBeenCalledTimes(1);
     });
   });
@@ -138,14 +155,20 @@ describe('EmployeesService', () => {
   });
 
   describe('remove', () => {
-    it('должен ставить deleted_at сотруднику (soft delete)', async () => {
-      mockPool.query.mockResolvedValueOnce({ rows: [{ id: 'emp-1' }] }); // findOne
+    it('должен ставить deleted_at активному сотруднику (soft delete)', async () => {
+      mockPool.query.mockResolvedValueOnce({ rows: [{ id: 'emp-1', deleted_at: null }] }); // findOne
       mockPool.query.mockResolvedValueOnce({ rows: [{ id: 'emp-1' }] }); // update
 
       const result = await service.remove('emp-1');
 
       expect(result).toEqual({ success: true, id: 'emp-1' });
       expect(mockPool.query.mock.calls[1][0]).toContain('SET deleted_at = CURRENT_TIMESTAMP');
+    });
+
+    it('должен возвращать NotFoundException (404) при попытке повторного удаления уже удаленного сотрудника', async () => {
+      mockPool.query.mockResolvedValueOnce({ rows: [{ id: 'emp-1', deleted_at: '2026-01-01' }] }); // findOne
+
+      await expect(service.remove('emp-1')).rejects.toThrow(NotFoundException);
     });
   });
 });

@@ -4,7 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { PG_CONNECTION } from '../database/database.constants';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './employees.dto';
 
@@ -12,9 +12,6 @@ import { CreateEmployeeDto, UpdateEmployeeDto } from './employees.dto';
 export class EmployeesService {
   constructor(@Inject(PG_CONNECTION) private readonly pool: Pool) {}
 
-  /**
-   * Получение списка сотрудников с подсчетом сканов и поддержкой поиска
-   */
   async findAll(search?: string) {
     let query = `
       SELECT 
@@ -63,9 +60,6 @@ export class EmployeesService {
     return res.rows;
   }
 
-  /**
-   * Получение сотрудника по ID с полным списком неудаленных сканов паспорта
-   */
   async findOne(id: string) {
     const query = `
       SELECT 
@@ -97,13 +91,15 @@ export class EmployeesService {
     return res.rows[0];
   }
 
-  /**
-   * Создание сотрудника и привязка сканов в единой транзакции
-   */
   async create(dto: CreateEmployeeDto) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Проверка существования и неудаленности прикрепляемых файлов
+      if (dto.file_ids && dto.file_ids.length > 0) {
+        await this.validateFileIds(dto.file_ids, client);
+      }
 
       const insertQuery = `
         INSERT INTO employees (
@@ -136,7 +132,6 @@ export class EmployeesService {
       const empRes = await client.query(insertQuery, values);
       const employeeId = empRes.rows[0].id;
 
-      // Привязка сканов паспорта
       if (dto.file_ids && dto.file_ids.length > 0) {
         for (const fileId of dto.file_ids) {
           await client.query(
@@ -158,9 +153,6 @@ export class EmployeesService {
     }
   }
 
-  /**
-   * Обновление сотрудника и синхронизация списка сканов в транзакции
-   */
   async update(id: string, dto: UpdateEmployeeDto) {
     const current = await this.findOne(id);
     if (current.deleted_at) {
@@ -170,6 +162,11 @@ export class EmployeesService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Проверка существования и неудаленности прикрепляемых файлов при обновлении
+      if (dto.file_ids && dto.file_ids.length > 0) {
+        await this.validateFileIds(dto.file_ids, client);
+      }
 
       const updateQuery = `
         UPDATE employees SET
@@ -202,7 +199,6 @@ export class EmployeesService {
 
       await client.query(updateQuery, values);
 
-      // Если в запросе явно передан массив file_ids — синхронизируем связи
       if (dto.file_ids !== undefined) {
         await client.query(
           `DELETE FROM employee_passport_files WHERE employee_id = $1`,
@@ -228,11 +224,11 @@ export class EmployeesService {
     }
   }
 
-  /**
-   * Мягкое удаление сотрудника
-   */
   async remove(id: string) {
-    await this.findOne(id);
+    const current = await this.findOne(id);
+    if (current.deleted_at) {
+      throw new NotFoundException(`Сотрудник с ID ${id} уже удален`);
+    }
 
     const res = await this.pool.query(
       `UPDATE employees 
@@ -242,6 +238,31 @@ export class EmployeesService {
       [id],
     );
 
+    if (!res.rows[0]) {
+      throw new NotFoundException(`Сотрудник с ID ${id} не найден или уже удален`);
+    }
+
     return { success: true, id: res.rows[0].id };
+  }
+
+  /**
+   * Валидация списка файлов: файлы обязаны существовать в таблице files и иметь deleted_at IS NULL
+   */
+  private async validateFileIds(fileIds: string[], client?: PoolClient): Promise<void> {
+    const uniqueIds = Array.from(new Set(fileIds));
+    const runner = client || this.pool;
+
+    const res = await runner.query(
+      `SELECT id FROM files WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`,
+      [uniqueIds],
+    );
+
+    if (res.rows.length !== uniqueIds.length) {
+      const foundIds = new Set(res.rows.map((r: { id: string }) => r.id));
+      const missingOrDeleted = uniqueIds.filter((fid) => !foundIds.has(fid));
+      throw new BadRequestException(
+        `Файлы со следующими ID не найдены или удалены: ${missingOrDeleted.join(', ')}`,
+      );
+    }
   }
 }

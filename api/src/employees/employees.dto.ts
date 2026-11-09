@@ -21,10 +21,31 @@ export class CreateEmployeeDto {
 
 export class UpdateEmployeeDto extends CreateEmployeeDto {}
 
-const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
 const passportSeriesRegex = /^\d{4}$/;
 const passportNumberRegex = /^\d{6}$/;
 const departmentCodeRegex = /^\d{3}-\d{3}$/;
+
+/**
+ * Валидатор реального существования календарного дня в формате ГГГГ-ММ-ДД.
+ * Отсекает некорректные даты (например, 2026-13-45, 2026-02-31) до отправки в PostgreSQL.
+ */
+const dateCustomValidator = (value: string, helpers: Joi.CustomHelpers) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return helpers.error('string.pattern.base');
+  }
+  const [year, month, day] = value.split('-').map(Number);
+  const parsedDate = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    isNaN(parsedDate.getTime()) ||
+    parsedDate.getUTCFullYear() !== year ||
+    parsedDate.getUTCMonth() + 1 !== month ||
+    parsedDate.getUTCDate() !== day
+  ) {
+    return helpers.error('date.calendar');
+  }
+  return value;
+};
 
 export const employeeValidationSchema = Joi.object({
   last_name: Joi.string().trim().min(2).max(100).required().messages({
@@ -39,10 +60,15 @@ export const employeeValidationSchema = Joi.object({
   }),
   middle_name: Joi.string().trim().max(100).allow('', null).optional(),
 
-  birth_date: Joi.string().pattern(dateRegex).required().messages({
-    'string.pattern.base': 'Дата рождения должна быть в формате ГГГГ-ММ-ДД',
-    'any.required': 'Дата рождения обязательна для заполнения',
-  }),
+  birth_date: Joi.string()
+    .custom(dateCustomValidator)
+    .required()
+    .messages({
+      'string.empty': 'Дата рождения обязательна для заполнения',
+      'string.pattern.base': 'Дата рождения должна быть в формате ГГГГ-ММ-ДД',
+      'date.calendar': 'Дата рождения содержит несуществующую календарную дату',
+      'any.required': 'Дата рождения обязательна для заполнения',
+    }),
 
   passport_series: Joi.string().pattern(passportSeriesRegex).required().messages({
     'string.pattern.base': 'Серия паспорта должна состоять ровно из 4 цифр',
@@ -52,10 +78,15 @@ export const employeeValidationSchema = Joi.object({
     'string.pattern.base': 'Номер паспорта должен состоять ровно из 6 цифр',
     'any.required': 'Номер паспорта обязателен для заполнения',
   }),
-  passport_issue_date: Joi.string().pattern(dateRegex).required().messages({
-    'string.pattern.base': 'Дата выдачи паспорта должна быть в формате ГГГГ-ММ-ДД',
-    'any.required': 'Дата выдачи паспорта обязательна для заполнения',
-  }),
+  passport_issue_date: Joi.string()
+    .custom(dateCustomValidator)
+    .required()
+    .messages({
+      'string.empty': 'Дата выдачи паспорта обязательна для заполнения',
+      'string.pattern.base': 'Дата выдачи паспорта должна быть в формате ГГГГ-ММ-ДД',
+      'date.calendar': 'Дата выдачи паспорта содержит несуществующую календарную дату',
+      'any.required': 'Дата выдачи паспорта обязательна для заполнения',
+    }),
   passport_department_code: Joi.string().pattern(departmentCodeRegex).required().messages({
     'string.pattern.base': 'Код подразделения должен быть в формате 000-000',
     'any.required': 'Код подразделения обязателен для заполнения',
@@ -84,7 +115,10 @@ export const employeeValidationSchema = Joi.object({
   reg_building: Joi.string().trim().max(20).allow('', null).optional(),
   reg_apartment: Joi.string().trim().max(20).allow('', null).optional(),
 
-  file_ids: Joi.array().items(Joi.string().uuid({ version: 'uuidv4' })).optional().messages({
-    'string.guid': 'Идентификатор файла должен быть валидным UUID',
-  }),
+  file_ids: Joi.array()
+    .items(Joi.string().uuid({ version: 'uuidv4' }))
+    .optional()
+    .messages({
+      'string.guid': 'Идентификатор файла должен быть валидным UUID',
+    }),
 });
