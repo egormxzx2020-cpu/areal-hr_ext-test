@@ -4,6 +4,7 @@ import {
   Get,
   Delete,
   Param,
+  Query,
   UploadedFile,
   UploadedFiles,
   UseInterceptors,
@@ -63,6 +64,16 @@ export class FilesController {
       throw new BadRequestException('Файлы не были переданы');
     }
     return Promise.all(files.map((file) => this.filesService.saveFile(file)));
+  }
+
+  /**
+   * Запуск очистки непривязанных файлов
+   * POST /files/cleanup-orphans?hours=2
+   */
+  @Post('cleanup-orphans')
+  async cleanupOrphans(@Query('hours') hours?: string) {
+    const parsedHours = hours !== undefined ? Math.max(0, parseFloat(hours)) : 2;
+    return this.filesService.cleanupOrphanFiles(parsedHours);
   }
 
   /**
