@@ -7,10 +7,14 @@ import {
 import { Pool } from 'pg';
 import { PG_CONNECTION } from '../database/database.constants';
 import { CreateOrganizationDto, UpdateOrganizationDto } from './organizations.dto';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class OrganizationsService {
-  constructor(@Inject(PG_CONNECTION) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_CONNECTION) private readonly pool: Pool,
+    private readonly auditService: AuditService,
+  ) {}
 
   async findAll() {
     const res = await this.pool.query(
@@ -23,7 +27,7 @@ export class OrganizationsService {
 
   async findOne(id: string) {
     const res = await this.pool.query(
-      `SELECT id, name, comment, created_at, updated_at 
+      `SELECT id, name, comment, created_at, updated_at, deleted_at 
        FROM organizations 
        WHERE id = $1 AND deleted_at IS NULL`,
       [id],
@@ -38,31 +42,57 @@ export class OrganizationsService {
     const res = await this.pool.query(
       `INSERT INTO organizations (name, comment) 
        VALUES ($1, $2) 
-       RETURNING id, name, comment, created_at, updated_at`,
+       RETURNING id, name, comment, created_at, updated_at, deleted_at`,
       [dto.name, dto.comment || null],
     );
-    return res.rows[0];
+    const created = res.rows[0];
+
+    await this.auditService.logChange({
+      entityType: 'Organization',
+      entityId: created.id,
+      changedFields: this.auditService.calculateDiff(null, {
+        name: created.name,
+        comment: created.comment,
+      }),
+    });
+
+    return created;
   }
 
   async update(id: string, dto: UpdateOrganizationDto) {
+    const current = await this.findOne(id);
+
     const res = await this.pool.query(
       `UPDATE organizations 
        SET name = $1, comment = $2, updated_at = CURRENT_TIMESTAMP 
        WHERE id = $3 AND deleted_at IS NULL 
-       RETURNING id, name, comment, created_at, updated_at`,
+       RETURNING id, name, comment, created_at, updated_at, deleted_at`,
       [dto.name, dto.comment || null, id],
     );
     if (!res.rows[0]) {
       throw new NotFoundException(`Организация с ID ${id} не найдена`);
     }
-    return res.rows[0];
+    const updated = res.rows[0];
+
+    const diff = this.auditService.calculateDiff(
+      { name: current.name, comment: current.comment },
+      { name: updated.name, comment: updated.comment },
+    );
+
+    if (Object.keys(diff).length > 0) {
+      await this.auditService.logChange({
+        entityType: 'Organization',
+        entityId: id,
+        changedFields: diff,
+      });
+    }
+
+    return updated;
   }
 
   async remove(id: string) {
-    // 1. Проверяем, существует ли организация
-    await this.findOne(id);
+    const current = await this.findOne(id);
 
-    // 2. Защита: нельзя удалить организацию, если в ней есть неудаленные отделы (409 Conflict)
     const childDepts = await this.pool.query(
       `SELECT 1 FROM departments WHERE organization_id = $1 AND deleted_at IS NULL LIMIT 1`,
       [id],
@@ -77,9 +107,18 @@ export class OrganizationsService {
       `UPDATE organizations 
        SET deleted_at = CURRENT_TIMESTAMP 
        WHERE id = $1 AND deleted_at IS NULL 
-       RETURNING id`,
+       RETURNING id, deleted_at`,
       [id],
     );
+
+    await this.auditService.logChange({
+      entityType: 'Organization',
+      entityId: id,
+      changedFields: {
+        deleted_at: { old: current.deleted_at, new: res.rows[0].deleted_at },
+      },
+    });
+
     return { success: true, id: res.rows[0].id };
   }
 }

@@ -7,10 +7,14 @@ import {
 import { Pool, PoolClient } from 'pg';
 import { PG_CONNECTION } from '../database/database.constants';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './employees.dto';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class EmployeesService {
-  constructor(@Inject(PG_CONNECTION) private readonly pool: Pool) {}
+  constructor(
+    @Inject(PG_CONNECTION) private readonly pool: Pool,
+    private readonly auditService: AuditService,
+  ) {}
 
   async findAll(search?: string) {
     let query = `
@@ -96,7 +100,6 @@ export class EmployeesService {
     try {
       await client.query('BEGIN');
 
-      // Проверка существования и неудаленности прикрепляемых файлов
       if (dto.file_ids && dto.file_ids.length > 0) {
         await this.validateFileIds(dto.file_ids, client);
       }
@@ -143,6 +146,23 @@ export class EmployeesService {
         }
       }
 
+      // Аудит создания сотрудника внутри транзакции
+      await this.auditService.logChange({
+        entityType: 'Employee',
+        entityId: employeeId,
+        changedFields: this.auditService.calculateDiff(null, {
+          last_name: dto.last_name,
+          first_name: dto.first_name,
+          middle_name: dto.middle_name || null,
+          birth_date: dto.birth_date,
+          passport_series: dto.passport_series,
+          passport_number: dto.passport_number,
+          reg_city: dto.reg_city,
+          reg_street: dto.reg_street,
+        }),
+        client,
+      });
+
       await client.query('COMMIT');
       return this.findOne(employeeId);
     } catch (err) {
@@ -163,7 +183,6 @@ export class EmployeesService {
     try {
       await client.query('BEGIN');
 
-      // Проверка существования и неудаленности прикрепляемых файлов при обновлении
       if (dto.file_ids && dto.file_ids.length > 0) {
         await this.validateFileIds(dto.file_ids, client);
       }
@@ -214,6 +233,21 @@ export class EmployeesService {
         }
       }
 
+      // Аудит обновления сотрудника внутри транзакции
+      const diff = this.auditService.calculateDiff(current, {
+        ...dto,
+        id,
+      });
+
+      if (Object.keys(diff).length > 0) {
+        await this.auditService.logChange({
+          entityType: 'Employee',
+          entityId: id,
+          changedFields: diff,
+          client,
+        });
+      }
+
       await client.query('COMMIT');
       return this.findOne(id);
     } catch (err) {
@@ -234,7 +268,7 @@ export class EmployeesService {
       `UPDATE employees 
        SET deleted_at = CURRENT_TIMESTAMP 
        WHERE id = $1 AND deleted_at IS NULL 
-       RETURNING id`,
+       RETURNING id, deleted_at`,
       [id],
     );
 
@@ -242,12 +276,17 @@ export class EmployeesService {
       throw new NotFoundException(`Сотрудник с ID ${id} не найден или уже удален`);
     }
 
+    await this.auditService.logChange({
+      entityType: 'Employee',
+      entityId: id,
+      changedFields: {
+        deleted_at: { old: current.deleted_at, new: res.rows[0].deleted_at },
+      },
+    });
+
     return { success: true, id: res.rows[0].id };
   }
 
-  /**
-   * Валидация списка файлов: файлы обязаны существовать в таблице files и иметь deleted_at IS NULL
-   */
   private async validateFileIds(fileIds: string[], client?: PoolClient): Promise<void> {
     const uniqueIds = Array.from(new Set(fileIds));
     const runner = client || this.pool;
