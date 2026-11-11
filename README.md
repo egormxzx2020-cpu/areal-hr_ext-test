@@ -158,38 +158,132 @@ git log --oneline --graph --decorate -n 10
 Просмотр различий (Diff Viewer): клик по любому файлу в списке изменений открывает параллельное сравнение «до/после» с подсветкой добавленных и удаленных строк.
 
 ## 6. Структура проекта
-areal-hr-test-2025/
-├── api/                             # Серверная часть (NestJS 10, CommonJS)
-│   ├── migrations/                  # Миграции структуры базы данных (node-pg-migrate)
-│   │   ├── ..._init_orgs_depts_positions.js
-│   │   └── ..._add_indexes_and_constraints.js
-│   ├── src/                         # Исходный код модулей API
-│   │   ├── common/                  # Общие пайпы и утилиты (JoiValidationPipe)
-│   │   ├── database/                # Пул соединений PostgreSQL (pg.Pool)
-│   │   ├── departments/             # Модуль отделов (CRUD, поиск циклов, юнит-тесты)
-│   │   ├── organizations/           # Модуль организаций (CRUD, проверка зависимостей)
-│   │   ├── positions/               # Модуль должностей (CRUD, валидация)
-│   │   ├── app.module.ts            # Корневой модуль NestJS
-│   │   └── main.ts                  # Точка входа API (CORS, порты, запуск)
-│   ├── .env                         # Локальная конфигурация переменных бэкенда
-│   └── package.json                 # Зависимости и скрипты API
-├── app/                             # Клиентская часть (Vue 3.5, Quasar CLI, Vite)
-│   ├── src/
-│   │   ├── boot/                    # Инициализация плагинов (axios.js с env-адресом)
-│   │   ├── layouts/                 # Базовый макет приложения (MainLayout.vue)
-│   │   ├── pages/                   # Страницы приложения (IndexPage.vue — справочники)
-│   │   └── router/                  # Маршрутизация Quasar
-│   ├── .env                         # Локальные переменные фронтенда (VITE_API_URL)
-│   └── package.json                 # Зависимости фронтенда
-├── containers/                      # Конфигурации контейнеризации (подготовка к этапам 7–8)
-│   ├── api/
-│   └── app/
-├── docs/                            # Документация и проектные схемы
-│   ├── schema.drawio                # Исходник ER-диаграммы базы данных
-│   ├── schema.png                   # Экспортированная диаграмма в формате PNG
-│   └── ui-preview.png               # Скриншот рабочего веб-интерфейса
-├── .env.example                     # Шаблон переменных окружения для развертывания
-├── .gitignore                       # Список исключений Git (node_modules, .env, build-файлы)
-├── docker-compose.yml               # Манифест развертывания PostgreSQL 17
-├── start-dev.bat                    # Скрипт быстрого запуска всей инфраструктуры под Windows
-└── README.md                        # Главная документация проекта
+areal-hr_ext-test/
+├── /api/                                # Серверная часть (NestJS 10, CommonJS)
+│   ├── /migrations/                     # Миграции базы данных (node-pg-migrate)
+│   │   ├── *_init_orgs_depts_positions.js
+│   │   ├── *_add_indexes_and_constraints.js
+│   │   ├── *_create_employees_and_files.js
+│   │   ├── *_create_audit_logs_table.js
+│   │   └── *_create_personnel_actions_table.js
+│   ├── /src/
+│   │   ├── /audit/                      # Сквозной журнал истории изменений (AUDIT_LOGS)
+│   │   │   ├── audit.controller.ts
+│   │   │   ├── audit.module.ts
+│   │   │   ├── audit.service.ts
+│   │   │   └── audit.service.spec.ts
+│   │   ├── /common/                     # Общие фильтры и пайпы валидации
+│   │   │   ├── /filters/
+│   │   │   │   ├── pg-exception.filter.ts      # Перехват PG 23505 -> 409 Conflict, 23503 -> 400
+│   │   │   │   └── pg-exception.filter.spec.ts
+│   │   │   └── /pipes/
+│   │   │       └── joi-validation.pipe.ts      # Пайп валидации схем с русскими ошибками
+│   │   ├── /database/                   # Подключение пула PostgreSQL и изоляция констант
+│   │   │   ├── database.constants.ts    # Константа PG_CONNECTION для тестов
+│   │   │   └── database.module.ts
+│   │   ├── /departments/                # Дерево отделов (CTE-проверка циклов, 409 Conflict)
+│   │   │   ├── departments.controller.ts
+│   │   │   ├── departments.dto.ts
+│   │   │   ├── departments.module.ts
+│   │   │   ├── departments.service.ts
+│   │   │   └── departments.service.spec.ts
+│   │   ├── /employees/                  # Сотрудники (календарные даты, транзакции, сканы)
+│   │   │   ├── employees.controller.ts
+│   │   │   ├── employees.dto.ts
+│   │   │   ├── employees.module.ts
+│   │   │   ├── employees.service.ts
+│   │   │   └── employees.service.spec.ts
+│   │   ├── /files/                      # Загрузка сканов Multer и фоновая очистка orphan-файлов
+│   │   │   ├── files.constants.ts
+│   │   │   ├── files.controller.ts
+│   │   │   ├── files.module.ts
+│   │   │   ├── files.service.ts
+│   │   │   └── files.service.spec.ts
+│   │   ├── /organizations/              # Организации (Soft Delete, контроль связей)
+│   │   │   ├── organizations.controller.ts
+│   │   │   ├── organizations.dto.ts
+│   │   │   ├── organizations.module.ts
+│   │   │   └── organizations.service.ts
+│   │   ├── /personnel-actions/          # Кадровые операции (машина состояний, срезы)
+│   │   │   ├── personnel-actions.controller.ts
+│   │   │   ├── personnel-actions.dto.ts
+│   │   │   ├── personnel-actions.module.ts
+│   │   │   ├── personnel-actions.service.ts
+│   │   │   └── personnel-actions.service.spec.ts
+│   │   ├── /positions/                  # Должности (уникальность, мягкое удаление)
+│   │   │   ├── positions.controller.ts
+│   │   │   ├── positions.dto.ts
+│   │   │   ├── positions.module.ts
+│   │   │   └── positions.service.ts
+│   │   ├── app.module.ts
+│   │   └── main.ts
+│   ├── /uploads/                        # Локальное хранилище документов
+│   │   └── /passports/
+│   ├── .env
+│   ├── package.json
+│   └── tsconfig.json
+├── /app/                                # Клиентская часть (Quasar v2, Vue 3, Vite)
+│   ├── /src/
+│   │   ├── /boot/
+│   │   │   └── axios.js                 # HTTP-клиент с переменной VITE_API_URL
+│   │   ├── /layouts/
+│   │   │   └── MainLayout.vue
+│   │   ├── /pages/
+│   │   │   ├── IndexPage.vue            # Реестр, приказы, история, формы и справочники
+│   │   │   └── ErrorNotFound.vue
+│   │   └── /router/
+│   │       └── routes.js
+│   ├── .env
+│   ├── package.json
+│   └── quasar.config.js
+├── /containers/                         # Конфигурации контейнеризации (подготовка к этапу деплоя)
+│   ├── /api/
+│   └── /app/
+├── /docs/                               # Схемы данных и документация
+│   ├── schema.drawio
+│   └── schema.png
+├── .env.example                         # Пример переменных окружения
+├── .gitignore
+├── docker-compose.yml                   # Запуск PostgreSQL 17
+├── start-dev.bat                        # Скрипт одновременного запуска API и UI в dev-режиме
+└── README.md                # Главная документация проекта
+
+
+## 7. Статус реализации проекта
+**Неделя 1 (Инфраструктура и проектирование):
+
+Спроектирована ER-диаграмма в Draw.io со всеми типами, связями и частичными индексами.
+
+Развернут изолированный контейнер PostgreSQL 17 в Docker.
+
+**Неделя 2 (Справочники организаций, отделов и должностей):
+
+CRUD-операции с поддержкой мягкого удаления (deleted_at).
+
+Рекурсивный CTE-поиск циклических зависимостей в дереве отделов (A → B → A).
+
+Защита от удаления сущностей с активными дочерними связями (статус 409 Conflict).
+
+Единый JoiValidationPipe, защита UUID через ParseUUIDPipe, частичные уникальные индексы.
+
+**Неделя 3 (Сотрудники и файлы документов):
+
+Миграции employees, files и связующей employee_passport_files с составным PK (employee_id, file_id).
+
+Модуль FilesModule на Multer (лимит 10 МБ, проверка MIME-типов, отдача потоком StreamableFile).
+
+Регламентная очистка непривязанных (сиротских) файлов документов с диска и из БД.
+
+Строгая валидация паспортов и календарных дат; транзакционная привязка сканов в БД.
+
+**Неделя 4 (Кадровые операции и история изменений):
+
+Сквозной модуль аудита audit_logs (JSONB-дельта { field: { old, new } }, автоматическая фиксация изменений).
+
+Таблица personnel_actions с ограничением CHECK (action_type IN ('hire', 'transfer_dept', 'change_salary', 'fire')).
+
+Машина состояний: валидация жизненного цикла сотрудника (нельзя уволить неустроенного, нельзя принять повторно без увольнения, проверка дат).
+
+Расчет актуального кадрового среза (отдел, должность, оклад, статус) через LEFT JOIN LATERAL.
+
+UI Quasar: проведение кадровых приказов в модальных окнах, таймлайн истории перемещений в личном деле.
