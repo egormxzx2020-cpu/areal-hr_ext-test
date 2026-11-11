@@ -534,7 +534,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import { api } from 'boot/axios';
+import { api } from '../boot/axios';
 import { useQuasar } from 'quasar';
 
 const $q = useQuasar();
