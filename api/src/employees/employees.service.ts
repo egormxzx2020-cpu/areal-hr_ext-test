@@ -16,6 +16,9 @@ export class EmployeesService {
     private readonly auditService: AuditService,
   ) {}
 
+  /**
+   * Получение списка сотрудников с вычислением кадрового среза и подсчетом файлов сканов
+   */
   async findAll(search?: string) {
     let query = `
       SELECT 
@@ -38,10 +41,34 @@ export class EmployeesService {
         e.created_at,
         e.updated_at,
         e.deleted_at,
-        COUNT(f.id) FILTER (WHERE f.id IS NOT NULL AND f.deleted_at IS NULL)::int AS files_count
+        COUNT(f.id) FILTER (WHERE f.id IS NOT NULL AND f.deleted_at IS NULL)::int AS files_count,
+        last_pa.action_type AS current_action_type,
+        last_pa.department_name AS current_department_name,
+        last_pa.position_name AS current_position_name,
+        last_pa.salary AS current_salary,
+        last_pa.action_date AS last_action_date,
+        CASE 
+          WHEN last_pa.action_type IS NULL THEN 'not_hired'
+          WHEN last_pa.action_type = 'fire' THEN 'fired'
+          ELSE 'employed'
+        END AS employment_status
       FROM employees e
       LEFT JOIN employee_passport_files epf ON epf.employee_id = e.id
       LEFT JOIN files f ON f.id = epf.file_id AND f.deleted_at IS NULL
+      LEFT JOIN LATERAL (
+        SELECT 
+          pa.action_type,
+          pa.salary,
+          pa.action_date,
+          d.name AS department_name,
+          pos.name AS position_name
+        FROM personnel_actions pa
+        LEFT JOIN departments d ON d.id = pa.department_id AND d.deleted_at IS NULL
+        LEFT JOIN positions pos ON pos.id = pa.position_id AND pos.deleted_at IS NULL
+        WHERE pa.employee_id = e.id AND pa.deleted_at IS NULL
+        ORDER BY pa.action_date DESC, pa.created_at DESC
+        LIMIT 1
+      ) last_pa ON true
       WHERE 1=1
     `;
     const params: any[] = [];
@@ -56,7 +83,13 @@ export class EmployeesService {
     }
 
     query += `
-      GROUP BY e.id
+      GROUP BY 
+        e.id, 
+        last_pa.action_type, 
+        last_pa.department_name, 
+        last_pa.position_name, 
+        last_pa.salary, 
+        last_pa.action_date
       ORDER BY (e.deleted_at IS NOT NULL), e.created_at DESC
     `;
 
@@ -64,6 +97,9 @@ export class EmployeesService {
     return res.rows;
   }
 
+  /**
+   * Получение детальной карточки сотрудника, прикрепленных неудаленных сканов и актуального статуса
+   */
   async findOne(id: string) {
     const query = `
       SELECT 
@@ -79,12 +115,48 @@ export class EmployeesService {
             )
           ) FILTER (WHERE f.id IS NOT NULL AND f.deleted_at IS NULL),
           '[]'
-        ) AS passport_files
+        ) AS passport_files,
+        last_pa.action_type AS current_action_type,
+        last_pa.department_name AS current_department_name,
+        last_pa.department_id AS current_department_id,
+        last_pa.position_name AS current_position_name,
+        last_pa.position_id AS current_position_id,
+        last_pa.salary AS current_salary,
+        last_pa.action_date AS last_action_date,
+        CASE 
+          WHEN last_pa.action_type IS NULL THEN 'not_hired'
+          WHEN last_pa.action_type = 'fire' THEN 'fired'
+          ELSE 'employed'
+        END AS employment_status
       FROM employees e
       LEFT JOIN employee_passport_files epf ON epf.employee_id = e.id
       LEFT JOIN files f ON f.id = epf.file_id AND f.deleted_at IS NULL
+      LEFT JOIN LATERAL (
+        SELECT 
+          pa.action_type,
+          pa.department_id,
+          pa.position_id,
+          pa.salary,
+          pa.action_date,
+          d.name AS department_name,
+          pos.name AS position_name
+        FROM personnel_actions pa
+        LEFT JOIN departments d ON d.id = pa.department_id AND d.deleted_at IS NULL
+        LEFT JOIN positions pos ON pos.id = pa.position_id AND pos.deleted_at IS NULL
+        WHERE pa.employee_id = e.id AND pa.deleted_at IS NULL
+        ORDER BY pa.action_date DESC, pa.created_at DESC
+        LIMIT 1
+      ) last_pa ON true
       WHERE e.id = $1
-      GROUP BY e.id
+      GROUP BY 
+        e.id, 
+        last_pa.action_type, 
+        last_pa.department_name, 
+        last_pa.department_id,
+        last_pa.position_name, 
+        last_pa.position_id,
+        last_pa.salary, 
+        last_pa.action_date
     `;
 
     const res = await this.pool.query(query, [id]);
@@ -95,11 +167,15 @@ export class EmployeesService {
     return res.rows[0];
   }
 
+  /**
+   * Создание сотрудника с валидацией файлов сканов и записью в audit_logs в транзакции
+   */
   async create(dto: CreateEmployeeDto) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
 
+      // Проверка валидности, существования и неудаленности прикрепляемых сканов
       if (dto.file_ids && dto.file_ids.length > 0) {
         await this.validateFileIds(dto.file_ids, client);
       }
@@ -146,7 +222,7 @@ export class EmployeesService {
         }
       }
 
-      // Аудит создания сотрудника внутри транзакции
+      // Фиксация создания сущности в аудит-логе внутри текущей транзакции
       await this.auditService.logChange({
         entityType: 'Employee',
         entityId: employeeId,
@@ -157,8 +233,15 @@ export class EmployeesService {
           birth_date: dto.birth_date,
           passport_series: dto.passport_series,
           passport_number: dto.passport_number,
+          passport_issue_date: dto.passport_issue_date,
+          passport_department_code: dto.passport_department_code,
+          passport_issued_by: dto.passport_issued_by,
+          reg_region: dto.reg_region,
           reg_city: dto.reg_city,
           reg_street: dto.reg_street,
+          reg_house: dto.reg_house,
+          reg_building: dto.reg_building || null,
+          reg_apartment: dto.reg_apartment || null,
         }),
         client,
       });
@@ -173,6 +256,9 @@ export class EmployeesService {
     }
   }
 
+  /**
+   * Обновление анкетных данных сотрудника и синхронизация прикрепленных сканов в транзакции
+   */
   async update(id: string, dto: UpdateEmployeeDto) {
     const current = await this.findOne(id);
     if (current.deleted_at) {
@@ -233,7 +319,6 @@ export class EmployeesService {
         }
       }
 
-      // Аудит обновления сотрудника внутри транзакции
       const diff = this.auditService.calculateDiff(current, {
         ...dto,
         id,
@@ -258,6 +343,9 @@ export class EmployeesService {
     }
   }
 
+  /**
+   * Мягкое удаление сотрудника (soft delete) с возвратом 404 при повторном вызове
+   */
   async remove(id: string) {
     const current = await this.findOne(id);
     if (current.deleted_at) {
@@ -287,6 +375,9 @@ export class EmployeesService {
     return { success: true, id: res.rows[0].id };
   }
 
+  /**
+   * Проверка переданных идентификаторов файлов на существование и отсутствие soft-delete
+   */
   private async validateFileIds(fileIds: string[], client?: PoolClient): Promise<void> {
     const uniqueIds = Array.from(new Set(fileIds));
     const runner = client || this.pool;

@@ -6,6 +6,7 @@ import { DepartmentsModule } from './departments/departments.module';
 import { FilesModule } from './files/files.module';
 import { EmployeesModule } from './employees/employees.module';
 import { AuditModule } from './audit/audit.module';
+import { PersonnelActionsModule } from './personnel-actions/personnel-actions.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { AuditModule } from './audit/audit.module';
     FilesModule,
     EmployeesModule,
     AuditModule,
+    PersonnelActionsModule,
   ],
   controllers: [],
   providers: [],
