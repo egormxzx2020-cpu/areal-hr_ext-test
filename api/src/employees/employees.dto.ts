@@ -25,11 +25,18 @@ const passportSeriesRegex = /^\d{4}$/;
 const passportNumberRegex = /^\d{6}$/;
 const departmentCodeRegex = /^\d{3}-\d{3}$/;
 
+const getTodayIsoDate = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 /**
- * Валидатор реального существования календарного дня в формате ГГГГ-ММ-ДД.
- * Отсекает некорректные даты (например, 2026-13-45, 2026-02-31) до отправки в PostgreSQL.
+ * Проверка календарной корректности даты (ГГГГ-ММ-ДД) и отсутствия даты в будущем
  */
-const dateCustomValidator = (value: string, helpers: Joi.CustomHelpers) => {
+const pastOrTodayDateValidator = (value: string, helpers: Joi.CustomHelpers) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     return helpers.error('string.pattern.base');
   }
@@ -44,6 +51,15 @@ const dateCustomValidator = (value: string, helpers: Joi.CustomHelpers) => {
   ) {
     return helpers.error('date.calendar');
   }
+
+  if (value > getTodayIsoDate()) {
+    return helpers.error('date.future');
+  }
+
+  if (value < '1900-01-01') {
+    return helpers.error('date.tooOld');
+  }
+
   return value;
 };
 
@@ -61,12 +77,14 @@ export const employeeValidationSchema = Joi.object({
   middle_name: Joi.string().trim().max(100).allow('', null).optional(),
 
   birth_date: Joi.string()
-    .custom(dateCustomValidator)
+    .custom(pastOrTodayDateValidator)
     .required()
     .messages({
       'string.empty': 'Дата рождения обязательна для заполнения',
       'string.pattern.base': 'Дата рождения должна быть в формате ГГГГ-ММ-ДД',
       'date.calendar': 'Дата рождения содержит несуществующую календарную дату',
+      'date.future': 'Дата рождения не может быть в будущем',
+      'date.tooOld': 'Дата рождения не может быть раньше 1900-01-01',
       'any.required': 'Дата рождения обязательна для заполнения',
     }),
 
@@ -79,12 +97,14 @@ export const employeeValidationSchema = Joi.object({
     'any.required': 'Номер паспорта обязателен для заполнения',
   }),
   passport_issue_date: Joi.string()
-    .custom(dateCustomValidator)
+    .custom(pastOrTodayDateValidator)
     .required()
     .messages({
       'string.empty': 'Дата выдачи паспорта обязательна для заполнения',
       'string.pattern.base': 'Дата выдачи паспорта должна быть в формате ГГГГ-ММ-ДД',
       'date.calendar': 'Дата выдачи паспорта содержит несуществующую календарную дату',
+      'date.future': 'Дата выдачи паспорта не может быть в будущем',
+      'date.tooOld': 'Дата выдачи паспорта не может быть раньше 1900-01-01',
       'any.required': 'Дата выдачи паспорта обязательна для заполнения',
     }),
   passport_department_code: Joi.string().pattern(departmentCodeRegex).required().messages({
@@ -121,4 +141,15 @@ export const employeeValidationSchema = Joi.object({
     .messages({
       'string.guid': 'Идентификатор файла должен быть валидным UUID',
     }),
+}).custom((value, helpers) => {
+  if (
+    value.birth_date &&
+    value.passport_issue_date &&
+    value.passport_issue_date < value.birth_date
+  ) {
+    return helpers.message({
+      custom: 'Дата выдачи паспорта не может быть раньше даты рождения сотрудника',
+    });
+  }
+  return value;
 });

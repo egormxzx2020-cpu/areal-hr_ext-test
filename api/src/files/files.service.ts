@@ -2,12 +2,12 @@ import {
   Injectable,
   Inject,
   NotFoundException,
+  BadRequestException,
   Logger,
   OnModuleInit,
   OnModuleDestroy,
 } from '@nestjs/common';
 import { Pool } from 'pg';
-import * as fs from 'fs';
 import { PG_CONNECTION } from '../database/database.constants';
 
 export interface FileRecord {
@@ -29,6 +29,7 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
   constructor(@Inject(PG_CONNECTION) private readonly pool: Pool) {}
 
   onModuleInit() {
+    // Фоновая мягкая очистка осиротевших файлов каждый час (файлы старше 2 часов)
     this.cleanupInterval = setInterval(() => {
       this.cleanupOrphanFiles(2).catch((err) => {
         this.logger.error(
@@ -38,6 +39,7 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
       });
     }, 60 * 60 * 1000);
 
+    // unref() предотвращает блокировку завершения процесса Node.js в тестах
     if (this.cleanupInterval.unref) {
       this.cleanupInterval.unref();
     }
@@ -50,6 +52,9 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Сохранение метаданных загруженного файла в таблицу files
+   */
   async saveFile(
     file: Express.Multer.File,
   ): Promise<Omit<FileRecord, 'file_path' | 'deleted_at'>> {
@@ -65,6 +70,9 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     return res.rows[0];
   }
 
+  /**
+   * Получение метаданных активного файла по ID
+   */
   async findById(id: string): Promise<FileRecord> {
     const res = await this.pool.query(
       `SELECT id, name, file_path, mime_type, size, created_at, updated_at, deleted_at
@@ -80,12 +88,15 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
     return res.rows[0];
   }
 
+  /**
+   * Мягкое удаление файла (Soft Delete)
+   */
   async softDelete(id: string): Promise<{ success: boolean; id: string }> {
     const current = await this.findById(id);
 
     await this.pool.query(
       `UPDATE files
-       SET deleted_at = CURRENT_TIMESTAMP
+       SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND deleted_at IS NULL`,
       [current.id],
     );
@@ -94,59 +105,43 @@ export class FilesService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Удаление физического файла с диска
-   */
-  async deletePhysicalFile(filePath: string): Promise<void> {
-    try {
-      if (fs.existsSync(filePath)) {
-        await fs.promises.unlink(filePath);
-      }
-    } catch (err: any) {
-      this.logger.warn(
-        `Не удалось удалить физический файл ${filePath}: ${err?.message || err}`,
-      );
-    }
-  }
-
-  /**
-   * Очистка непривязанных (осиротевших) файлов с диска и из БД
+   * Мягкая очистка непривязанных (осиротевших) файлов.
+   * Помечает deleted_at = CURRENT_TIMESTAMP для файлов без связей в employee_passport_files,
+   * созданных ранее olderThanHours часов назад.
    */
   async cleanupOrphanFiles(
     olderThanHours = 2,
   ): Promise<{ deletedCount: number; deletedIds: string[] }> {
-    const hours = Math.max(0, Number(olderThanHours) || 0);
+    if (
+      typeof olderThanHours !== 'number' ||
+      !Number.isFinite(olderThanHours) ||
+      olderThanHours < 0
+    ) {
+      throw new BadRequestException(
+        'Параметр hours должен быть неотрицательным числом',
+      );
+    }
 
     const query = `
-      SELECT f.id, f.file_path
-      FROM files f
-      WHERE NOT EXISTS (
-        SELECT 1 
-        FROM employee_passport_files epf 
-        WHERE epf.file_id = f.id
-      )
-      AND f.created_at <= (CURRENT_TIMESTAMP - ($1 || ' hours')::interval)
+      UPDATE files f
+      SET deleted_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE f.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM employee_passport_files epf
+          WHERE epf.file_id = f.id
+        )
+        AND f.created_at <= (CURRENT_TIMESTAMP - ($1 * INTERVAL '1 hour'))
+      RETURNING f.id
     `;
 
-    const res = await this.pool.query(query, [hours]);
-    const orphanFiles: Array<{ id: string; file_path: string }> = res.rows;
+    const res = await this.pool.query(query, [olderThanHours]);
+    const deletedIds: string[] = res.rows.map((row: { id: string }) => row.id);
 
-    if (orphanFiles.length === 0) {
-      return { deletedCount: 0, deletedIds: [] };
+    if (deletedIds.length > 0) {
+      this.logger.log(`Мягко очищено непривязанных файлов: ${deletedIds.length}`);
     }
-
-    const deletedIds: string[] = [];
-
-    for (const file of orphanFiles) {
-      await this.deletePhysicalFile(file.file_path);
-      deletedIds.push(file.id);
-    }
-
-    await this.pool.query(
-      `DELETE FROM files WHERE id = ANY($1::uuid[])`,
-      [deletedIds],
-    );
-
-    this.logger.log(`Очищено непривязанных файлов: ${deletedIds.length}`);
 
     return {
       deletedCount: deletedIds.length,

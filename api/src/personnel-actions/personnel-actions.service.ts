@@ -3,8 +3,9 @@ import {
   Inject,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { PG_CONNECTION } from '../database/database.constants';
 import { CreatePersonnelActionDto } from './personnel-actions.dto';
 import { AuditService } from '../audit/audit.service';
@@ -27,9 +28,13 @@ export class PersonnelActionsService {
   ) {}
 
   /**
-   * Получение текущего кадрового состояния сотрудника
+   * Получение текущего кадрового состояния сотрудника (поддерживает работу внутри транзакции)
    */
-  async getEmployeeCurrentState(employeeId: string): Promise<EmployeeCurrentStatus> {
+  async getEmployeeCurrentState(
+    employeeId: string,
+    client?: PoolClient,
+  ): Promise<EmployeeCurrentStatus> {
+    const runner = client || this.pool;
     const query = `
       SELECT 
         pa.action_type,
@@ -47,7 +52,7 @@ export class PersonnelActionsService {
       LIMIT 1
     `;
 
-    const res = await this.pool.query(query, [employeeId]);
+    const res = await runner.query(query, [employeeId]);
     if (!res.rows[0]) {
       return {
         status: 'not_hired',
@@ -123,90 +128,90 @@ export class PersonnelActionsService {
   }
 
   /**
-   * Проведение кадрового приказа с валидацией цепочки состояний
+   * Проведение кадрового приказа с блокировкой строки сотрудника (FOR UPDATE) внутри транзакции
    */
   async create(dto: CreatePersonnelActionDto) {
-    const empRes = await this.pool.query(
-      `SELECT id, birth_date, deleted_at FROM employees WHERE id = $1`,
-      [dto.employee_id],
-    );
-    if (!empRes.rows[0] || empRes.rows[0].deleted_at) {
-      throw new NotFoundException('Сотрудник не найден или удален');
-    }
-
-    const employee = empRes.rows[0];
-
-    // Дата кадрового приказа не может быть раньше даты рождения
-    if (new Date(dto.action_date) < new Date(employee.birth_date)) {
-      throw new BadRequestException(
-        'Дата кадрового действия не может быть раньше даты рождения сотрудника',
-      );
-    }
-
-    // Проверка текущего кадрового состояния
-    const currentState = await this.getEmployeeCurrentState(dto.employee_id);
-
-    if (dto.action_type === 'hire') {
-      if (currentState.status === 'employed') {
-        throw new BadRequestException(
-          'Сотрудник уже трудоустроен. Для смены подразделения оформите перевод',
-        );
-      }
-    } else {
-      if (currentState.status !== 'employed') {
-        throw new BadRequestException(
-          'Данное действие доступно только для работающего сотрудника',
-        );
-      }
-    }
-
-    // Хронологический порядок дат
-    if (
-      currentState.last_action_date &&
-      new Date(dto.action_date) < new Date(currentState.last_action_date)
-    ) {
-      throw new BadRequestException(
-        `Дата кадрового приказа не может быть ранее предыдущего кадрового события (${currentState.last_action_date})`,
-      );
-    }
-
-    // Валидация существования отдела и должности
-    let departmentId = dto.department_id || null;
-    let positionId = dto.position_id || null;
-    let salary = dto.salary ? Number(dto.salary) : null;
-
-    if (dto.action_type === 'hire' || dto.action_type === 'transfer_dept') {
-      const deptCheck = await this.pool.query(
-        `SELECT id FROM departments WHERE id = $1 AND deleted_at IS NULL`,
-        [dto.department_id],
-      );
-      if (!deptCheck.rows[0]) {
-        throw new BadRequestException('Указанный отдел не найден или удален');
-      }
-
-      const posCheck = await this.pool.query(
-        `SELECT id FROM positions WHERE id = $1 AND deleted_at IS NULL`,
-        [dto.position_id],
-      );
-      if (!posCheck.rows[0]) {
-        throw new BadRequestException('Указанная должность не найдена или удалена');
-      }
-
-      if (dto.action_type === 'transfer_dept' && !salary) {
-        salary = currentState.salary;
-      }
-    } else if (dto.action_type === 'change_salary') {
-      departmentId = currentState.department_id;
-      positionId = currentState.position_id;
-    } else if (dto.action_type === 'fire') {
-      departmentId = null;
-      positionId = null;
-      salary = null;
-    }
-
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Блокируем запись сотрудника для исключения гонки параллельных запросов (race condition)
+      const empRes = await client.query(
+        `SELECT id, birth_date, deleted_at FROM employees WHERE id = $1 FOR UPDATE`,
+        [dto.employee_id],
+      );
+      if (!empRes.rows[0] || empRes.rows[0].deleted_at) {
+        throw new NotFoundException('Сотрудник не найден или удален');
+      }
+
+      const employee = empRes.rows[0];
+
+      // Дата кадрового приказа не может быть раньше даты рождения
+      if (dto.action_date < employee.birth_date) {
+        throw new BadRequestException(
+          'Дата кадрового действия не может быть раньше даты рождения сотрудника',
+        );
+      }
+
+      // Проверка актуального состояния строго внутри транзакции после блокировки
+      const currentState = await this.getEmployeeCurrentState(dto.employee_id, client);
+
+      if (dto.action_type === 'hire') {
+        if (currentState.status === 'employed') {
+          throw new BadRequestException(
+            'Сотрудник уже трудоустроен. Для смены подразделения оформите перевод',
+          );
+        }
+      } else {
+        if (currentState.status !== 'employed') {
+          throw new BadRequestException(
+            'Данное действие доступно только для работающего сотрудника',
+          );
+        }
+      }
+
+      // Хронологический порядок дат
+      if (
+        currentState.last_action_date &&
+        dto.action_date < currentState.last_action_date
+      ) {
+        throw new BadRequestException(
+          `Дата кадрового приказа не может быть ранее предыдущего кадрового события (${currentState.last_action_date})`,
+        );
+      }
+
+      let departmentId = dto.department_id || null;
+      let positionId = dto.position_id || null;
+      let salary = dto.salary ? Number(dto.salary) : null;
+
+      if (dto.action_type === 'hire' || dto.action_type === 'transfer_dept') {
+        const deptCheck = await client.query(
+          `SELECT id FROM departments WHERE id = $1 AND deleted_at IS NULL`,
+          [dto.department_id],
+        );
+        if (!deptCheck.rows[0]) {
+          throw new BadRequestException('Указанный отдел не найден или удален');
+        }
+
+        const posCheck = await client.query(
+          `SELECT id FROM positions WHERE id = $1 AND deleted_at IS NULL`,
+          [dto.position_id],
+        );
+        if (!posCheck.rows[0]) {
+          throw new BadRequestException('Указанная должность не найдена или удалена');
+        }
+
+        if (dto.action_type === 'transfer_dept' && !salary) {
+          salary = currentState.salary;
+        }
+      } else if (dto.action_type === 'change_salary') {
+        departmentId = currentState.department_id;
+        positionId = currentState.position_id;
+      } else if (dto.action_type === 'fire') {
+        departmentId = null;
+        positionId = null;
+        salary = null;
+      }
 
       const insertQuery = `
         INSERT INTO personnel_actions (
@@ -251,29 +256,77 @@ export class PersonnelActionsService {
   }
 
   /**
-   * Мягкое удаление кадрового приказа
+   * Мягкое удаление кадрового приказа с проверкой целостности цепочки состояний
    */
   async remove(id: string) {
-    const res = await this.pool.query(
-      `UPDATE personnel_actions 
-       SET deleted_at = CURRENT_TIMESTAMP 
-       WHERE id = $1 AND deleted_at IS NULL 
-       RETURNING id, employee_id, action_type`,
-      [id],
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    if (!res.rows[0]) {
-      throw new NotFoundException(`Кадровый приказ с ID ${id} не найден или уже удален`);
+      const targetRes = await client.query(
+        `SELECT id, employee_id, action_type, action_date, created_at, deleted_at
+         FROM personnel_actions
+         WHERE id = $1 AND deleted_at IS NULL`,
+        [id],
+      );
+
+      if (!targetRes.rows[0]) {
+        throw new NotFoundException(`Кадровый приказ с ID ${id} не найден или уже удален`);
+      }
+
+      const target = targetRes.rows[0];
+
+      // Блокируем сотрудника на время проверки и удаления приказа
+      await client.query(
+        `SELECT id FROM employees WHERE id = $1 FOR UPDATE`,
+        [target.employee_id],
+      );
+
+      // Проверяем, нет ли более поздних активных приказов по этому сотруднику
+      const newerRes = await client.query(
+        `SELECT id, action_type, action_date
+         FROM personnel_actions
+         WHERE employee_id = $1
+           AND deleted_at IS NULL
+           AND id <> $2
+           AND (
+             action_date > $3
+             OR (action_date = $3 AND created_at > $4)
+           )
+         LIMIT 1`,
+        [target.employee_id, id, target.action_date, target.created_at],
+      );
+
+      if (newerRes.rows[0]) {
+        throw new ConflictException(
+          'Невозможно удалить кадровый приказ, так как после него оформлены более поздние приказы. Удаляйте приказы в обратном хронологическом порядке',
+        );
+      }
+
+      const delRes = await client.query(
+        `UPDATE personnel_actions
+         SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND deleted_at IS NULL
+         RETURNING id, deleted_at`,
+        [id],
+      );
+
+      await this.auditService.logChange({
+        entityType: 'PersonnelAction',
+        entityId: id,
+        changedFields: {
+          deleted_at: { old: null, new: delRes.rows[0].deleted_at },
+        },
+        client,
+      });
+
+      await client.query('COMMIT');
+      return { success: true, id };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
-
-    await this.auditService.logChange({
-      entityType: 'PersonnelAction',
-      entityId: id,
-      changedFields: {
-        deleted_at: { old: null, new: new Date().toISOString() },
-      },
-    });
-
-    return { success: true, id };
   }
 }

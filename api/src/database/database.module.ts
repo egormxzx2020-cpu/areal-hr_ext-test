@@ -1,10 +1,13 @@
 import { Module, Global } from '@nestjs/common';
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import * as Joi from 'joi';
 import { PG_CONNECTION } from './database.constants';
 
 export { PG_CONNECTION };
+
+// Возвращаем PostgreSQL DATE (OID 1082) как строку 'YYYY-MM-DD' без сдвига часовых поясов
+types.setTypeParser(types.builtins.DATE, (val: string) => val);
 
 const dbProvider = {
   provide: PG_CONNECTION,

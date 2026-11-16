@@ -1,4 +1,9 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { Pool } from 'pg';
 import { PG_CONNECTION } from '../database/database.constants';
 import { CreatePositionDto, UpdatePositionDto } from './positions.dto';
@@ -85,9 +90,20 @@ export class PositionsService {
   async remove(id: string) {
     const current = await this.findOne(id);
 
+    // Проверка использования должности в активных кадровых приказах
+    const usageCheck = await this.pool.query(
+      `SELECT 1 FROM personnel_actions WHERE position_id = $1 AND deleted_at IS NULL LIMIT 1`,
+      [id],
+    );
+    if (usageCheck.rows.length > 0) {
+      throw new ConflictException(
+        'Невозможно удалить должность, так как она используется в кадровых приказах',
+      );
+    }
+
     const res = await this.pool.query(
       `UPDATE positions 
-       SET deleted_at = CURRENT_TIMESTAMP 
+       SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND deleted_at IS NULL 
        RETURNING id, deleted_at`,
       [id],

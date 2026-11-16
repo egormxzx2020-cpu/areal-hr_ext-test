@@ -1,10 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { FilesService } from './files.service';
+import { FilesController } from './files.controller';
 import { PG_CONNECTION } from '../database/database.constants';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 
-describe('FilesService', () => {
+describe('FilesService & FilesController', () => {
   let service: FilesService;
+  let controller: FilesController;
   let mockPool: {
     query: jest.Mock;
   };
@@ -15,6 +17,7 @@ describe('FilesService', () => {
     };
 
     const module: TestingModule = await Test.createTestingModule({
+      controllers: [FilesController],
       providers: [
         FilesService,
         {
@@ -25,12 +28,14 @@ describe('FilesService', () => {
     }).compile();
 
     service = module.get<FilesService>(FilesService);
+    controller = module.get<FilesController>(FilesController);
   });
 
   afterEach(() => {
-    service.onModuleDestroy();
+    if (service) {
+      service.onModuleDestroy();
+    }
     jest.clearAllMocks();
-    jest.restoreAllMocks();
   });
 
   describe('findById', () => {
@@ -51,40 +56,57 @@ describe('FilesService', () => {
     });
   });
 
-  describe('cleanupOrphanFiles', () => {
-    it('должен возвращать 0 удаленных файлов, если непривязанных файлов нет', async () => {
-      mockPool.query.mockResolvedValueOnce({ rows: [] });
-
-      const result = await service.cleanupOrphanFiles(2);
-
-      expect(result).toEqual({ deletedCount: 0, deletedIds: [] });
-      expect(mockPool.query).toHaveBeenCalledTimes(1);
-    });
-
-    it('должен удалять физические файлы с диска и строки из БД для найденных сирот', async () => {
-      const mockOrphans = [
-        { id: 'file-1', file_path: 'uploads/passports/orphan1.pdf' },
-        { id: 'file-2', file_path: 'uploads/passports/orphan2.png' },
-      ];
-
-      // 1. Поиск непривязанных файлов
-      mockPool.query.mockResolvedValueOnce({ rows: mockOrphans });
-      // 2. DELETE из таблицы files
+  describe('softDelete', () => {
+    it('должен выполнять мягкое удаление файла по ID', async () => {
+      mockPool.query.mockResolvedValueOnce({
+        rows: [{ id: 'file-1', name: 'passport.pdf', deleted_at: null }],
+      });
       mockPool.query.mockResolvedValueOnce({});
 
-      // Мокаем метод сервиса вместо системного модуля fs платформы Node.js
-      const deleteSpy = jest
-        .spyOn(service, 'deletePhysicalFile')
-        .mockResolvedValue(undefined);
+      const result = await service.softDelete('file-1');
+
+      expect(result).toEqual({ success: true, id: 'file-1' });
+      expect(mockPool.query.mock.calls[1][0]).toContain(
+        'SET deleted_at = CURRENT_TIMESTAMP',
+      );
+    });
+  });
+
+  describe('cleanupOrphanFiles', () => {
+    it('должен выполнять мягкое удаление (UPDATE deleted_at) непривязанных файлов', async () => {
+      mockPool.query.mockResolvedValueOnce({
+        rows: [{ id: 'file-1' }, { id: 'file-2' }],
+      });
 
       const result = await service.cleanupOrphanFiles(2);
 
-      expect(result.deletedCount).toBe(2);
-      expect(result.deletedIds).toEqual(['file-1', 'file-2']);
-      expect(deleteSpy).toHaveBeenCalledTimes(2);
-      expect(deleteSpy).toHaveBeenCalledWith('uploads/passports/orphan1.pdf');
-      expect(deleteSpy).toHaveBeenCalledWith('uploads/passports/orphan2.png');
-      expect(mockPool.query.mock.calls[1][0]).toContain('DELETE FROM files WHERE id = ANY');
+      expect(result).toEqual({
+        deletedCount: 2,
+        deletedIds: ['file-1', 'file-2'],
+      });
+      expect(mockPool.query).toHaveBeenCalledTimes(1);
+      const sql = mockPool.query.mock.calls[0][0] as string;
+      expect(sql).toContain('UPDATE files f');
+      expect(sql).toContain('SET deleted_at = CURRENT_TIMESTAMP');
+      expect(sql).not.toContain('DELETE FROM files');
+      expect(mockPool.query.mock.calls[0][1]).toEqual([2]);
+    });
+
+    it('должен выбрасывать BadRequestException при передаче NaN или отрицательного числа', async () => {
+      await expect(service.cleanupOrphanFiles(Number.NaN)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.cleanupOrphanFiles(-5)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockPool.query).not.toHaveBeenCalled();
+    });
+
+    it('контроллер должен отклонять некорректный параметр ?hours=abc со статусом 400', async () => {
+      await expect(controller.cleanupOrphans('abc')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockPool.query).not.toHaveBeenCalled();
     });
   });
 });

@@ -67,12 +67,29 @@ export class FilesController {
   }
 
   /**
-   * Запуск очистки непривязанных файлов
+   * Запуск мягкой очистки непривязанных файлов
    * POST /files/cleanup-orphans?hours=2
    */
   @Post('cleanup-orphans')
   async cleanupOrphans(@Query('hours') hours?: string) {
-    const parsedHours = hours !== undefined ? Math.max(0, parseFloat(hours)) : 2;
+    let parsedHours = 2;
+
+    if (hours !== undefined && hours.trim() !== '') {
+      const trimmed = hours.trim();
+      if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+        throw new BadRequestException(
+          'Параметр hours должен быть неотрицательным числом',
+        );
+      }
+
+      parsedHours = Number(trimmed);
+      if (!Number.isFinite(parsedHours) || parsedHours < 0 || parsedHours > 8760) {
+        throw new BadRequestException(
+          'Параметр hours должен быть в диапазоне от 0 до 8760',
+        );
+      }
+    }
+
     return this.filesService.cleanupOrphanFiles(parsedHours);
   }
 
