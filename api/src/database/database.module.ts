@@ -36,6 +36,7 @@ const dbProvider = {
         POSTGRES_DB: Joi.string().required(),
         PORT: Joi.number().default(3000),
         CORS_ORIGIN: Joi.string().default('http://localhost:9000'),
+        SESSION_SECRET: Joi.string().min(16).required(),
       }),
     }),
   ],
