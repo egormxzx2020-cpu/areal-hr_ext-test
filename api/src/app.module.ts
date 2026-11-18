@@ -8,6 +8,7 @@ import { EmployeesModule } from './employees/employees.module';
 import { AuditModule } from './audit/audit.module';
 import { PersonnelActionsModule } from './personnel-actions/personnel-actions.module';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { AuthModule } from './auth/auth.module';
     AuditModule,
     PersonnelActionsModule,
     AuthModule,
+    UsersModule,
   ],
   controllers: [],
   providers: [],
