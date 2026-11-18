@@ -13,6 +13,7 @@ import {
   ParseUUIDPipe,
   StreamableFile,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
@@ -23,15 +24,16 @@ import {
   fileFilterConfig,
   MAX_FILE_SIZE,
 } from './files.constants';
+import { AuthenticatedGuard } from '../auth/authenticated.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('files')
+@UseGuards(AuthenticatedGuard, RolesGuard)
+@Roles('admin', 'hr_manager')
 export class FilesController {
   constructor(private readonly filesService: FilesService) {}
 
-  /**
-   * Загрузка одного файла скана
-   * POST /files/upload
-   */
   @Post('upload')
   @UseInterceptors(
     FileInterceptor('file', {
@@ -47,10 +49,6 @@ export class FilesController {
     return this.filesService.saveFile(file);
   }
 
-  /**
-   * Загрузка пачки файлов сканов (до 10 файлов за раз)
-   * POST /files/upload-multiple
-   */
   @Post('upload-multiple')
   @UseInterceptors(
     FilesInterceptor('files', 10, {
@@ -66,37 +64,6 @@ export class FilesController {
     return Promise.all(files.map((file) => this.filesService.saveFile(file)));
   }
 
-  /**
-   * Запуск мягкой очистки непривязанных файлов
-   * POST /files/cleanup-orphans?hours=2
-   */
-  @Post('cleanup-orphans')
-  async cleanupOrphans(@Query('hours') hours?: string) {
-    let parsedHours = 2;
-
-    if (hours !== undefined && hours.trim() !== '') {
-      const trimmed = hours.trim();
-      if (!/^\d+(\.\d+)?$/.test(trimmed)) {
-        throw new BadRequestException(
-          'Параметр hours должен быть неотрицательным числом',
-        );
-      }
-
-      parsedHours = Number(trimmed);
-      if (!Number.isFinite(parsedHours) || parsedHours < 0 || parsedHours > 8760) {
-        throw new BadRequestException(
-          'Параметр hours должен быть в диапазоне от 0 до 8760',
-        );
-      }
-    }
-
-    return this.filesService.cleanupOrphanFiles(parsedHours);
-  }
-
-  /**
-   * Получение метаданных файла
-   * GET /files/:id
-   */
   @Get(':id')
   async getFileInfo(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const file = await this.filesService.findById(id);
@@ -110,10 +77,6 @@ export class FilesController {
     };
   }
 
-  /**
-   * Просмотр или скачивание файла
-   * GET /files/:id/download
-   */
   @Get(':id/download')
   async downloadFile(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -135,12 +98,33 @@ export class FilesController {
     return new StreamableFile(fileStream);
   }
 
-  /**
-   * Мягкое удаление файла
-   * DELETE /files/:id
-   */
   @Delete(':id')
   async removeFile(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     return this.filesService.softDelete(id);
+  }
+
+  @Post('cleanup-orphans')
+  async cleanupOrphans(@Query('hours') hours?: string) {
+    let parsedHours = 24;
+
+    if (hours !== undefined && hours !== '') {
+      if (!/^\d+(\.\d+)?$/.test(hours.trim())) {
+        throw new BadRequestException(
+          'Параметр hours должен быть положительным числом',
+        );
+      }
+      parsedHours = Number(hours);
+      if (
+        !Number.isFinite(parsedHours) ||
+        parsedHours <= 0 ||
+        parsedHours > 8760
+      ) {
+        throw new BadRequestException(
+          'Параметр hours должен быть в диапазоне от 0.01 до 8760',
+        );
+      }
+    }
+
+    return this.filesService.cleanupOrphanFiles(parsedHours);
   }
 }

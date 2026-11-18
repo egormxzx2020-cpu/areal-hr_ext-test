@@ -8,7 +8,7 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
-  UsePipes,
+  UseGuards,
 } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import {
@@ -17,8 +17,14 @@ import {
   employeeValidationSchema,
 } from './employees.dto';
 import { JoiValidationPipe } from '../common/pipes/joi-validation.pipe';
+import { AuthenticatedGuard } from '../auth/authenticated.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 
 @Controller('employees')
+@UseGuards(AuthenticatedGuard, RolesGuard)
+@Roles('admin', 'hr_manager')
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
@@ -33,21 +39,29 @@ export class EmployeesController {
   }
 
   @Post()
-  @UsePipes(new JoiValidationPipe(employeeValidationSchema))
-  create(@Body() body: CreateEmployeeDto) {
-    return this.employeesService.create(body);
+  create(
+    @Body(new JoiValidationPipe(employeeValidationSchema))
+    body: CreateEmployeeDto,
+    @CurrentUser('id') userId?: string,
+  ) {
+    return this.employeesService.create(body, userId);
   }
 
   @Put(':id')
   update(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
-    @Body(new JoiValidationPipe(employeeValidationSchema)) body: UpdateEmployeeDto,
+    @Body(new JoiValidationPipe(employeeValidationSchema))
+    body: UpdateEmployeeDto,
+    @CurrentUser('id') userId?: string,
   ) {
-    return this.employeesService.update(id, body);
+    return this.employeesService.update(id, body, userId);
   }
 
   @Delete(':id')
-  remove(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    return this.employeesService.remove(id);
+  remove(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser('id') userId?: string,
+  ) {
+    return this.employeesService.remove(id, userId);
   }
 }

@@ -9,24 +9,6 @@ import { PG_CONNECTION } from '../database/database.constants';
 import { CreateEmployeeDto, UpdateEmployeeDto } from './employees.dto';
 import { AuditService } from '../audit/audit.service';
 
-const AUDITABLE_EMPLOYEE_FIELDS = [
-  'last_name',
-  'first_name',
-  'middle_name',
-  'birth_date',
-  'passport_series',
-  'passport_number',
-  'passport_issue_date',
-  'passport_department_code',
-  'passport_issued_by',
-  'reg_region',
-  'reg_city',
-  'reg_street',
-  'reg_house',
-  'reg_building',
-  'reg_apartment',
-] as const;
-
 @Injectable()
 export class EmployeesService {
   constructor(
@@ -34,6 +16,9 @@ export class EmployeesService {
     private readonly auditService: AuditService,
   ) {}
 
+  /**
+   * Получение списка сотрудников с вычислением кадрового среза и подсчетом файлов сканов
+   */
   async findAll(search?: string) {
     let query = `
       SELECT 
@@ -112,6 +97,9 @@ export class EmployeesService {
     return res.rows;
   }
 
+  /**
+   * Получение детальной карточки сотрудника, прикрепленных неудаленных сканов и актуального статуса
+   */
   async findOne(id: string) {
     const query = `
       SELECT 
@@ -179,7 +167,10 @@ export class EmployeesService {
     return res.rows[0];
   }
 
-  async create(dto: CreateEmployeeDto) {
+  /**
+   * Создание сотрудника с валидацией файлов сканов и записью в audit_logs в транзакции
+   */
+  async create(dto: CreateEmployeeDto, userId?: string | null) {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -230,16 +221,27 @@ export class EmployeesService {
         }
       }
 
-      const initialAuditable: Record<string, any> = {};
-      for (const field of AUDITABLE_EMPLOYEE_FIELDS) {
-        const val = dto[field];
-        initialAuditable[field] = val === '' || val === undefined ? null : val;
-      }
-
       await this.auditService.logChange({
         entityType: 'Employee',
         entityId: employeeId,
-        changedFields: this.auditService.calculateDiff(null, initialAuditable),
+        changedFields: this.auditService.calculateDiff(null, {
+          last_name: dto.last_name,
+          first_name: dto.first_name,
+          middle_name: dto.middle_name || null,
+          birth_date: dto.birth_date,
+          passport_series: dto.passport_series,
+          passport_number: dto.passport_number,
+          passport_issue_date: dto.passport_issue_date,
+          passport_department_code: dto.passport_department_code,
+          passport_issued_by: dto.passport_issued_by,
+          reg_region: dto.reg_region,
+          reg_city: dto.reg_city,
+          reg_street: dto.reg_street,
+          reg_house: dto.reg_house,
+          reg_building: dto.reg_building || null,
+          reg_apartment: dto.reg_apartment || null,
+        }),
+        userId: userId ?? null,
         client,
       });
 
@@ -253,7 +255,10 @@ export class EmployeesService {
     }
   }
 
-  async update(id: string, dto: UpdateEmployeeDto) {
+  /**
+   * Обновление анкетных данных сотрудника и синхронизация прикрепленных сканов в транзакции
+   */
+  async update(id: string, dto: UpdateEmployeeDto, userId?: string | null) {
     const current = await this.findOne(id);
     if (current.deleted_at) {
       throw new BadRequestException('Нельзя редактировать удаленного сотрудника');
@@ -313,34 +318,50 @@ export class EmployeesService {
         }
       }
 
-      // Сравниваем строго аудируемые поля анкеты без вычисляемых current_*
-      const oldAuditable: Record<string, any> = {};
-      const newAuditable: Record<string, any> = {};
+      const oldAuditable = {
+        last_name: current.last_name,
+        first_name: current.first_name,
+        middle_name: current.middle_name ?? null,
+        birth_date: current.birth_date,
+        passport_series: current.passport_series,
+        passport_number: current.passport_number,
+        passport_issue_date: current.passport_issue_date,
+        passport_department_code: current.passport_department_code,
+        passport_issued_by: current.passport_issued_by,
+        reg_region: current.reg_region,
+        reg_city: current.reg_city,
+        reg_street: current.reg_street,
+        reg_house: current.reg_house,
+        reg_building: current.reg_building ?? null,
+        reg_apartment: current.reg_apartment ?? null,
+      };
 
-      for (const field of AUDITABLE_EMPLOYEE_FIELDS) {
-        oldAuditable[field] = current[field] ?? null;
-        const rawNew = dto[field];
-        newAuditable[field] = rawNew === '' || rawNew === undefined ? null : rawNew;
-      }
+      const newAuditable = {
+        last_name: dto.last_name,
+        first_name: dto.first_name,
+        middle_name: dto.middle_name || null,
+        birth_date: dto.birth_date,
+        passport_series: dto.passport_series,
+        passport_number: dto.passport_number,
+        passport_issue_date: dto.passport_issue_date,
+        passport_department_code: dto.passport_department_code,
+        passport_issued_by: dto.passport_issued_by,
+        reg_region: dto.reg_region,
+        reg_city: dto.reg_city,
+        reg_street: dto.reg_street,
+        reg_house: dto.reg_house,
+        reg_building: dto.reg_building || null,
+        reg_apartment: dto.reg_apartment || null,
+      };
 
       const diff = this.auditService.calculateDiff(oldAuditable, newAuditable);
-
-      // Отслеживаем изменение списка прикрепленных файлов только если состав реально изменился
-      if (dto.file_ids !== undefined) {
-        const oldFileIds = Array.isArray(current.passport_files)
-          ? [...current.passport_files.map((f: { id: string }) => f.id)].sort()
-          : [];
-        const newFileIds = [...Array.from(new Set(dto.file_ids))].sort();
-        if (JSON.stringify(oldFileIds) !== JSON.stringify(newFileIds)) {
-          diff.file_ids = { old: oldFileIds, new: newFileIds };
-        }
-      }
 
       if (Object.keys(diff).length > 0) {
         await this.auditService.logChange({
           entityType: 'Employee',
           entityId: id,
           changedFields: diff,
+          userId: userId ?? null,
           client,
         });
       }
@@ -355,7 +376,10 @@ export class EmployeesService {
     }
   }
 
-  async remove(id: string) {
+  /**
+   * Мягкое удаление сотрудника (soft delete) с возвратом 404 при повторном вызове
+   */
+  async remove(id: string, userId?: string | null) {
     const current = await this.findOne(id);
     if (current.deleted_at) {
       throw new NotFoundException(`Сотрудник с ID ${id} уже удален`);
@@ -363,7 +387,7 @@ export class EmployeesService {
 
     const res = await this.pool.query(
       `UPDATE employees 
-       SET deleted_at = CURRENT_TIMESTAMP 
+       SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
        WHERE id = $1 AND deleted_at IS NULL 
        RETURNING id, deleted_at`,
       [id],
@@ -379,11 +403,15 @@ export class EmployeesService {
       changedFields: {
         deleted_at: { old: current.deleted_at, new: res.rows[0].deleted_at },
       },
+      userId: userId ?? null,
     });
 
     return { success: true, id: res.rows[0].id };
   }
 
+  /**
+   * Проверка переданных идентификаторов файлов на существование и отсутствие soft-delete
+   */
   private async validateFileIds(fileIds: string[], client?: PoolClient): Promise<void> {
     const uniqueIds = Array.from(new Set(fileIds));
     const runner = client || this.pool;

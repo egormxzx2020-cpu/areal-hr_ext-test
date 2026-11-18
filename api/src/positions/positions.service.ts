@@ -38,7 +38,7 @@ export class PositionsService {
     return res.rows[0];
   }
 
-  async create(dto: CreatePositionDto) {
+  async create(dto: CreatePositionDto, userId?: string | null) {
     const res = await this.pool.query(
       `INSERT INTO positions (name) 
        VALUES ($1) 
@@ -51,12 +51,13 @@ export class PositionsService {
       entityType: 'Position',
       entityId: created.id,
       changedFields: this.auditService.calculateDiff(null, { name: created.name }),
+      userId: userId ?? null,
     });
 
     return created;
   }
 
-  async update(id: string, dto: UpdatePositionDto) {
+  async update(id: string, dto: UpdatePositionDto, userId?: string | null) {
     const current = await this.findOne(id);
 
     const res = await this.pool.query(
@@ -81,16 +82,16 @@ export class PositionsService {
         entityType: 'Position',
         entityId: id,
         changedFields: diff,
+        userId: userId ?? null,
       });
     }
 
     return updated;
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId?: string | null) {
     const current = await this.findOne(id);
 
-    // Проверка использования должности в активных кадровых приказах
     const usageCheck = await this.pool.query(
       `SELECT 1 FROM personnel_actions WHERE position_id = $1 AND deleted_at IS NULL LIMIT 1`,
       [id],
@@ -118,6 +119,7 @@ export class PositionsService {
       changedFields: {
         deleted_at: { old: current.deleted_at, new: res.rows[0].deleted_at },
       },
+      userId: userId ?? null,
     });
 
     return { success: true, id };

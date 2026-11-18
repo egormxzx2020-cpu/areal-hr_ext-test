@@ -4,10 +4,16 @@ import {
   Param,
   Query,
   ParseUUIDPipe,
+  UseGuards,
 } from '@nestjs/common';
 import { AuditService } from './audit.service';
+import { AuthenticatedGuard } from '../auth/authenticated.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
 
 @Controller('audit-logs')
+@UseGuards(AuthenticatedGuard, RolesGuard)
+@Roles('admin', 'hr_manager')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 

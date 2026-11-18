@@ -30,7 +30,6 @@ export class AuditService {
   async logChange(params: LogChangeParams): Promise<void> {
     const { entityType, entityId, changedFields, userId = null, client } = params;
 
-    // Не сохраняем аудит, если нет реальных изменений
     if (!changedFields || Object.keys(changedFields).length === 0) {
       return;
     }
@@ -58,7 +57,6 @@ export class AuditService {
 
   /**
    * Вычисление дельты изменений между старым и новым состоянием объекта.
-   * Возвращает объект формата { [field]: { old: val, new: val } }.
    */
   calculateDiff(
     oldObj: Record<string, any> | null,
@@ -68,7 +66,6 @@ export class AuditService {
     const diff: ChangedFieldsMap = {};
     const ignoreSet = new Set(ignoreFields);
 
-    // Сценарий создания (INSERT): старого объекта нет, все поля новые
     if (!oldObj && newObj) {
       for (const [key, val] of Object.entries(newObj)) {
         if (!ignoreSet.has(key) && val !== undefined) {
@@ -78,7 +75,6 @@ export class AuditService {
       return diff;
     }
 
-    // Сценарий обновления (UPDATE): сравнение значений
     if (oldObj && newObj) {
       const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
 
@@ -88,7 +84,6 @@ export class AuditService {
         const oldVal = oldObj[key] !== undefined ? oldObj[key] : null;
         const newVal = newObj[key] !== undefined ? newObj[key] : null;
 
-        // Приведение дат к ISO-строке для корректного сравнения
         const normalizedOld = oldVal instanceof Date ? oldVal.toISOString() : oldVal;
         const normalizedNew = newVal instanceof Date ? newVal.toISOString() : newVal;
 
@@ -106,10 +101,19 @@ export class AuditService {
    */
   async findByEntity(entityType: string, entityId: string) {
     const query = `
-      SELECT id, changed_at, user_id, entity_type, entity_id, changed_fields
-      FROM audit_logs
-      WHERE entity_type = $1 AND entity_id = $2
-      ORDER BY changed_at DESC
+      SELECT 
+        al.id,
+        al.changed_at,
+        al.user_id,
+        u.login AS user_login,
+        TRIM(CONCAT_WS(' ', u.last_name, u.first_name, u.middle_name)) AS user_full_name,
+        al.entity_type,
+        al.entity_id,
+        al.changed_fields
+      FROM audit_logs al
+      LEFT JOIN users u ON u.id = al.user_id
+      WHERE al.entity_type = $1 AND al.entity_id = $2
+      ORDER BY al.changed_at DESC
     `;
     const res = await this.pool.query(query, [entityType, entityId]);
     return res.rows;
@@ -120,19 +124,28 @@ export class AuditService {
    */
   async findAll(limit = 50, offset = 0, entityType?: string) {
     let query = `
-      SELECT id, changed_at, user_id, entity_type, entity_id, changed_fields
-      FROM audit_logs
+      SELECT 
+        al.id,
+        al.changed_at,
+        al.user_id,
+        u.login AS user_login,
+        TRIM(CONCAT_WS(' ', u.last_name, u.first_name, u.middle_name)) AS user_full_name,
+        al.entity_type,
+        al.entity_id,
+        al.changed_fields
+      FROM audit_logs al
+      LEFT JOIN users u ON u.id = al.user_id
       WHERE 1=1
     `;
     const params: any[] = [];
 
     if (entityType) {
       params.push(entityType);
-      query += ` AND entity_type = $${params.length}`;
+      query += ` AND al.entity_type = $${params.length}`;
     }
 
     params.push(limit, offset);
-    query += ` ORDER BY changed_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
+    query += ` ORDER BY al.changed_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`;
 
     const res = await this.pool.query(query, params);
     return res.rows;

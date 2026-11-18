@@ -38,7 +38,7 @@ export class OrganizationsService {
     return res.rows[0];
   }
 
-  async create(dto: CreateOrganizationDto) {
+  async create(dto: CreateOrganizationDto, userId?: string | null) {
     const res = await this.pool.query(
       `INSERT INTO organizations (name, comment) 
        VALUES ($1, $2) 
@@ -54,12 +54,13 @@ export class OrganizationsService {
         name: created.name,
         comment: created.comment,
       }),
+      userId: userId ?? null,
     });
 
     return created;
   }
 
-  async update(id: string, dto: UpdateOrganizationDto) {
+  async update(id: string, dto: UpdateOrganizationDto, userId?: string | null) {
     const current = await this.findOne(id);
 
     const res = await this.pool.query(
@@ -84,13 +85,14 @@ export class OrganizationsService {
         entityType: 'Organization',
         entityId: id,
         changedFields: diff,
+        userId: userId ?? null,
       });
     }
 
     return updated;
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId?: string | null) {
     const current = await this.findOne(id);
 
     const childDepts = await this.pool.query(
@@ -105,7 +107,7 @@ export class OrganizationsService {
 
     const res = await this.pool.query(
       `UPDATE organizations 
-       SET deleted_at = CURRENT_TIMESTAMP 
+       SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
        WHERE id = $1 AND deleted_at IS NULL 
        RETURNING id, deleted_at`,
       [id],
@@ -117,6 +119,7 @@ export class OrganizationsService {
       changedFields: {
         deleted_at: { old: current.deleted_at, new: res.rows[0].deleted_at },
       },
+      userId: userId ?? null,
     });
 
     return { success: true, id: res.rows[0].id };
