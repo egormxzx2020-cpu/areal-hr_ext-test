@@ -6,7 +6,27 @@
         <q-toolbar-title>
           Areal HR — Система кадрового учета
         </q-toolbar-title>
-        <div class="text-caption">Неделя 3: Учет сотрудников и документы</div>
+
+        <div v-if="user" class="row items-center q-gutter-sm">
+          <div class="text-right gt-xs">
+            <div class="text-body2 text-weight-medium">{{ userFullName }}</div>
+            <div class="text-caption text-blue-1">@{{ user.login }}</div>
+          </div>
+
+          <q-badge
+            :color="isAdmin ? 'deep-orange' : 'teal-7'"
+            :label="roleLabel"
+            class="q-py-xs q-px-sm"
+          />
+
+          <q-btn
+            flat
+            dense
+            icon="logout"
+            label="Выйти"
+            @click="handleLogout"
+          />
+        </div>
       </q-toolbar>
     </q-header>
 
@@ -17,4 +37,20 @@
 </template>
 
 <script setup>
+import { useRouter } from 'vue-router';
+import { useQuasar } from 'quasar';
+import { useAuth } from '../composables/useAuth';
+
+const router = useRouter();
+const $q = useQuasar();
+const { user, isAdmin, userFullName, roleLabel, logout } = useAuth();
+
+async function handleLogout() {
+  await logout();
+  $q.notify({
+    type: 'info',
+    message: 'Вы вышли из системы',
+  });
+  await router.push('/login');
+}
 </script>
