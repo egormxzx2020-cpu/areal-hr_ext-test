@@ -1,13 +1,22 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import session = require('express-session');
-import passport = require('passport');
+import * as passportModule from 'passport';
 import { AppModule } from './app.module';
 import { PgExceptionFilter } from './common/filters/pg-exception.filter';
+
+const passport =
+  (passportModule as { default?: typeof passportModule }).default ?? passportModule;
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+
+  const isProduction = configService.get<string>('NODE_ENV') === 'production';
+
+  if (isProduction) {
+    app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  }
 
   const corsOrigin = configService.get<string>(
     'CORS_ORIGIN',
@@ -36,7 +45,7 @@ async function bootstrap() {
       cookie: {
         httpOnly: true,
         sameSite: 'lax',
-        secure: false,
+        secure: isProduction,
         maxAge: 1000 * 60 * 60 * 12,
       },
     }),
