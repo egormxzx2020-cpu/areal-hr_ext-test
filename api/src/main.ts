@@ -1,9 +1,12 @@
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
+import { Pool } from 'pg';
 import session = require('express-session');
+import connectPgSimple = require('connect-pg-simple');
 import * as passportModule from 'passport';
 import { AppModule } from './app.module';
 import { PgExceptionFilter } from './common/filters/pg-exception.filter';
+import { PG_CONNECTION } from './database/database.constants';
 
 const passport =
   (passportModule as { default?: typeof passportModule }).default ?? passportModule;
@@ -11,6 +14,8 @@ const passport =
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+  const pgPool = app.get<Pool>(PG_CONNECTION);
+  const PgSessionStore = connectPgSimple(session);
 
   const isProduction = configService.get<string>('NODE_ENV') === 'production';
 
@@ -38,6 +43,11 @@ async function bootstrap() {
 
   app.use(
     session({
+      store: new PgSessionStore({
+        pool: pgPool,
+        tableName: 'session',
+        createTableIfMissing: true,
+      }),
       name: 'areal_hr.sid',
       secret: sessionSecret,
       resave: false,
