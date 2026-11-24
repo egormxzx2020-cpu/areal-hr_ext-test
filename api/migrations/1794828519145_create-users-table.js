@@ -1,16 +1,19 @@
 const argon2 = require('argon2');
 
-/**
- * @type {import('node-pg-migrate').ColumnDefinitions | undefined}
- */
+try {
+  require('dotenv').config();
+} catch {
+  // Переменные уже переданы через окружение процесса или контейнера
+}
+
 exports.shorthands = undefined;
 
-/**
- * @param pgm {import('node-pg-migrate').MigrationBuilder}
- * @returns {Promise<void>}
- */
 exports.up = async (pgm) => {
-  // 1. Таблица пользователей системы (USERS)
+  const adminPassword = process.env.INITIAL_ADMIN_PASSWORD;
+  if (!adminPassword) {
+    throw new Error('Не задана переменная окружения INITIAL_ADMIN_PASSWORD');
+  }
+
   pgm.sql(`
     CREATE TABLE IF NOT EXISTS users (
       id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -26,14 +29,12 @@ exports.up = async (pgm) => {
     );
   `);
 
-  // 2. Частичный уникальный индекс на логин среди активных пользователей
   pgm.sql(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_login_active
     ON users (login)
     WHERE deleted_at IS NULL;
   `);
 
-  // 3. Внешний ключ и индекс для связи журнала аудита с автором изменений
   pgm.sql(`
     CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id
     ON audit_logs (user_id);
@@ -45,8 +46,7 @@ exports.up = async (pgm) => {
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
   `);
 
-  // 4. Создание первичного администратора (пароль по умолчанию: Admin123!)
-  const initialPasswordHash = await argon2.hash('Admin123!', {
+  const initialPasswordHash = await argon2.hash(adminPassword, {
     type: argon2.argon2id,
   });
   const escapedHash = initialPasswordHash.replace(/'/g, "''");
@@ -65,10 +65,6 @@ exports.up = async (pgm) => {
   `);
 };
 
-/**
- * @param pgm {import('node-pg-migrate').MigrationBuilder}
- * @returns {Promise<void>}
- */
 exports.down = async (pgm) => {
   pgm.sql(`ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS fk_audit_logs_user_id;`);
   pgm.sql(`DROP INDEX IF EXISTS idx_audit_logs_user_id;`);
