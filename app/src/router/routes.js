@@ -10,6 +10,7 @@ const routes = [
     meta: { requiresAuth: true },
     children: [
       { path: '', component: () => import('../pages/IndexPage.vue') },
+      { path: 'organizations', component: () => import('../pages/OrganizationsPage.vue') },
     ],
   },
   {

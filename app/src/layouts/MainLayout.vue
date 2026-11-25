@@ -28,6 +28,26 @@
           />
         </div>
       </q-toolbar>
+
+      <q-tabs
+        align="left"
+        class="bg-white text-grey-8"
+        active-color="primary"
+        indicator-color="primary"
+        dense
+      >
+        <q-route-tab to="/" exact icon="people" label="Сотрудники" />
+        <q-route-tab to="/organizations" icon="business" label="Организации" />
+        <q-route-tab to="/departments" icon="account_tree" label="Отделы" />
+        <q-route-tab to="/positions" icon="work" label="Должности" />
+        <q-route-tab to="/history" icon="history" label="История изменений" />
+        <q-route-tab
+          v-if="isAdmin"
+          to="/users"
+          icon="manage_accounts"
+          label="Пользователи"
+        />
+      </q-tabs>
     </q-header>
 
     <q-page-container>
