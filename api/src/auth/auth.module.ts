@@ -7,6 +7,7 @@ import { SessionSerializer } from './session.serializer';
 import { LocalAuthGuard } from './local-auth.guard';
 import { AuthenticatedGuard } from './authenticated.guard';
 import { RolesGuard } from './roles.guard';
+import { LoginRateLimitGuard } from './login-rate-limit.guard';
 import { AuthController } from './auth.controller';
 
 @Global()
@@ -21,6 +22,7 @@ import { AuthController } from './auth.controller';
     LocalAuthGuard,
     AuthenticatedGuard,
     RolesGuard,
+    LoginRateLimitGuard,
   ],
   exports: [
     AuthSecurityService,
