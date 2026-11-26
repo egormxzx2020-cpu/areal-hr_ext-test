@@ -25,7 +25,7 @@ export default route(function () {
   });
 
   Router.beforeEach(async (to) => {
-    const { isAuthChecked, isAuthenticated, fetchCurrentUser } = useAuth();
+    const { isAuthChecked, isAuthenticated, isAdmin, fetchCurrentUser } = useAuth();
 
     if (!isAuthChecked.value) {
       await fetchCurrentUser();
@@ -36,6 +36,10 @@ export default route(function () {
     }
 
     if (to.meta.guestOnly && isAuthenticated.value) {
+      return '/';
+    }
+
+    if (to.meta.requiresAdmin && !isAdmin.value) {
       return '/';
     }
 

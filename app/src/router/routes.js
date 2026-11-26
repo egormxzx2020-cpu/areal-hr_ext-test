@@ -13,6 +13,11 @@ const routes = [
       { path: 'organizations', component: () => import('../pages/OrganizationsPage.vue') },
       { path: 'departments', component: () => import('../pages/DepartmentsPage.vue') },
       { path: 'positions', component: () => import('../pages/PositionsPage.vue') },
+      {
+        path: 'users',
+        component: () => import('../pages/UsersPage.vue'),
+        meta: { requiresAdmin: true },
+      },
     ],
   },
   {
