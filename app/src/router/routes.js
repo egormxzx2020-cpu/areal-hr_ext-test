@@ -9,7 +9,8 @@ const routes = [
     component: () => import('../layouts/MainLayout.vue'),
     meta: { requiresAuth: true },
     children: [
-      { path: '', component: () => import('../pages/IndexPage.vue') },
+      { path: '', component: () => import('../pages/EmployeesPage.vue') },
+      { path: 'employees', redirect: '/' },
       { path: 'organizations', component: () => import('../pages/OrganizationsPage.vue') },
       { path: 'departments', component: () => import('../pages/DepartmentsPage.vue') },
       { path: 'positions', component: () => import('../pages/PositionsPage.vue') },

@@ -1,3 +1,5 @@
+import { api } from '../boot/axios';
+
 export function extractErrorMessage(err, fallback = 'Ошибка при выполнении операции') {
   const msg = err?.response?.data?.message;
   if (Array.isArray(msg)) return msg.join('; ');
@@ -16,6 +18,19 @@ export function notifyError($q, err, fallback) {
     position: 'top-right',
     timeout: 4500,
   });
+}
+
+export function getTodayIsoDate() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export function formatFullName(emp) {
+  if (!emp) return '';
+  return [emp.last_name, emp.first_name, emp.middle_name].filter(Boolean).join(' ');
 }
 
 export function formatDate(val) {
@@ -43,4 +58,48 @@ export function formatDateTime(val) {
 export function formatSalary(val) {
   if (val === null || val === undefined) return '—';
   return `${Number(val).toLocaleString('ru-RU')} ₽`;
+}
+
+export function formatFileSize(bytes) {
+  if (!bytes) return '0 Б';
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} МБ`;
+}
+
+export function getFileDownloadUrl(fileId) {
+  const baseUrl = api.defaults.baseURL || 'http://localhost:3000';
+  return `${baseUrl}/files/${fileId}/download`;
+}
+
+export function getEmploymentStatusLabel(status) {
+  if (status === 'employed') return 'Работает';
+  if (status === 'fired') return 'Уволен';
+  return 'Не принят';
+}
+
+export function getEmploymentStatusColor(status) {
+  if (status === 'employed') return 'positive';
+  if (status === 'fired') return 'negative';
+  return 'grey-7';
+}
+
+export function getActionTypeLabel(type) {
+  const map = {
+    hire: 'Прием на работу',
+    transfer_dept: 'Кадровый перевод',
+    change_salary: 'Изменение оклада',
+    fire: 'Увольнение',
+  };
+  return map[type] || type;
+}
+
+export function getActionTypeColor(type) {
+  const map = {
+    hire: 'positive',
+    transfer_dept: 'info',
+    change_salary: 'warning',
+    fire: 'negative',
+  };
+  return map[type] || 'primary';
 }
