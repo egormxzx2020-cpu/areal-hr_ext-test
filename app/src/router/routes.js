@@ -13,6 +13,7 @@ const routes = [
       { path: 'organizations', component: () => import('../pages/OrganizationsPage.vue') },
       { path: 'departments', component: () => import('../pages/DepartmentsPage.vue') },
       { path: 'positions', component: () => import('../pages/PositionsPage.vue') },
+      { path: 'history', component: () => import('../pages/HistoryPage.vue') },
       {
         path: 'users',
         component: () => import('../pages/UsersPage.vue'),
